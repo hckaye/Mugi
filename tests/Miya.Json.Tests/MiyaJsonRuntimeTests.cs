@@ -127,6 +127,27 @@ public sealed class MiyaJsonRuntimeTests
         Assert.Equal(BitConverter.DoubleToInt64Bits(-0.0), BitConverter.DoubleToInt64Bits(negativeZero));
     }
 
+    [Fact]
+    public void UInt64DigitBoundariesRoundTrip()
+    {
+        ulong power = 1;
+        for (var digits = 1; digits <= 20; digits++)
+        {
+            if (power > 1)
+            {
+                Assert.Equal(power - 1, RoundTrip(power - 1, WriteUInt64, ReadUInt64));
+            }
+
+            Assert.Equal(power, RoundTrip(power, WriteUInt64, ReadUInt64));
+            if (digits == 20)
+            {
+                break;
+            }
+
+            power *= 10;
+        }
+    }
+
     [Theory]
     [InlineData("-79228162514264337593543950335")]
     [InlineData("79228162514264337593543950335")]
@@ -181,6 +202,27 @@ public sealed class MiyaJsonRuntimeTests
         {
             MaxDocumentByteLength = 3,
         }));
+    }
+
+    [Fact]
+    public void WriterDoesNotSplitSurrogatePairsAtChunkBoundaries()
+    {
+        var value = new string('x', 2047) + "😀tail";
+        Assert.Equal(value, RoundTrip(value, WriteString, ReadString));
+    }
+
+    [Fact]
+    public void LongUnescapedNonAsciiStringRoundTrips()
+    {
+        var value = string.Concat(Enumerable.Repeat("日本語😀", 1024));
+        Assert.Equal(value, RoundTrip(value, WriteString, ReadString));
+    }
+
+    [Fact]
+    public void LongEscapedAsciiStringRoundTrips()
+    {
+        var value = new string('x', 4096) + "\"\\\n\t";
+        Assert.Equal(value, RoundTrip(value, WriteString, ReadString));
     }
 
     [Fact]

@@ -8,13 +8,23 @@ var shortRun = string.Equals(
     Environment.GetEnvironmentVariable("MIYA_BENCHMARK_SHORT"),
     "1",
     StringComparison.Ordinal);
-var baseJob = shortRun ? Job.ShortRun : Job.Default;
+var finalRun = string.Equals(
+    Environment.GetEnvironmentVariable("MIYA_BENCHMARK_FINAL"),
+    "1",
+    StringComparison.Ordinal);
+var baseJob = shortRun
+    ? Job.ShortRun
+    : finalRun
+        ? Job.Default.WithWarmupCount(5).WithIterationCount(10).WithLaunchCount(1)
+        : Job.Default;
+var jitJobId = shortRun ? "JIT-Short" : finalRun ? "JIT-Final" : "JIT";
+var aotJobId = shortRun ? "NativeAOT-Short" : finalRun ? "NativeAOT-Final" : "NativeAOT";
 var jitConfig = ManualConfig.Create(DefaultConfig.Instance)
-    .AddJob(baseJob.WithRuntime(CoreRuntime.Core10_0).WithId(shortRun ? "JIT-Short" : "JIT"));
+    .AddJob(baseJob.WithRuntime(CoreRuntime.Core10_0).WithId(jitJobId));
 var aotConfig = ManualConfig.Create(DefaultConfig.Instance)
-    .AddJob(baseJob.WithRuntime(NativeAotRuntime.Net10_0).WithId(shortRun ? "NativeAOT-Short" : "NativeAOT"));
+    .AddJob(baseJob.WithRuntime(NativeAotRuntime.Net10_0).WithId(aotJobId));
 var mainConfig = ManualConfig.Create(jitConfig)
-    .AddJob(baseJob.WithRuntime(NativeAotRuntime.Net10_0).WithId(shortRun ? "NativeAOT-Short" : "NativeAOT"));
+    .AddJob(baseJob.WithRuntime(NativeAotRuntime.Net10_0).WithId(aotJobId));
 
 if (args.Contains("--spanjson", StringComparer.Ordinal))
 {
