@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Miya.Json</PackageId>
+    <Description>The Native AOT-compatible JSON serializer used by Miya.</Description>
   </PropertyGroup>
 
 </Project>
