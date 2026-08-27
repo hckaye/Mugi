@@ -419,107 +419,16 @@ HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起�
 
 `AppOptions.ConfigureServices` は、内部の Kestrel ホストに追加のサービスを登録します。Miya が依存性注入を必要とすることはありません。このフックは Kestrel を高度にカスタマイズするためだけのものです。設定すると、平文のエンドポイントでもサービス経由のホスティングパスを使います。登録したサービスはサーバー内部に留まり、ハンドラーやミドルウェアには届きません。
 
-## 計測結果
+## パフォーマンス
 
-計測は 2026-08-27 に、Apple M5 CPU、物理 10 コア、macOS Tahoe 26.5.2、.NET SDK 10.0.203、.NET ランタイム 10.0.7 arm64 で行いました。BenchmarkDotNet 0.15.8 は、concurrent workstation GC、1 回の launch、5 回の warmup、10 回の計測を使いました。ホストはそれ以外の隔離をしていないので、近い結果を比較するときは BenchmarkDotNet のレポートにある誤差と標準偏差の列も見てください。
+Miya は高速で割り当ての少ない動作を目指しています。計測したシナリオでは次のとおりです。
 
-### NativeAOT サンプル
+- 生成された JSON シリアライズは、JIT と NativeAOT の両方で、平均時間と割り当てバイト数のどちらも System.Text.Json の source generation に並ぶか上回ります。
+- ルーティングとミドルウェアパイプラインは、同期のホットパスで割り当てがありません（404 ミスと 405 不一致だけは、その小さなレスポンス状態を割り当てます）。
+- `samples/Hello` の NativeAOT バイナリは約 6.8 MiB で、プロセス起動から数ミリ秒で最初のリクエストに応答します。
 
-`dotnet publish samples/Hello/Hello.csproj -c Release` は IL や AOT の警告なしで完了しました。publish した実行ファイルは `dotnet` なしで動き、Text、JSON、404、405、HEAD のリクエストを通しました。
+数値、シナリオ、計測環境、再現方法は [docs/benchmarks.ja.md](docs/benchmarks.ja.md) にあります。
 
-| 項目 | 結果 |
-| --- | ---: |
-| `Hello` 実行ファイルのサイズ | 7,128,392 bytes (6.80 MiB) |
-| プロセス起動から `GET /` 完了まで、10 回の中央値 | 8.443 ms |
-
-起動のサンプルは 21.598、9.278、8.435、8.452、8.848、8.710、7.641、8.389、7.446、8.114 ms でした。各回は新しい loopback ポートで新しい NativeAOT プロセスを起動し、HTTP レスポンスを受け取り終えてから停止しました。
-
-### Miya と System.Text.Json
-
-シリアライザーの計測は 2026-08-28 に、上記の Apple M5、macOS arm64、.NET 10 環境で取り直しました。シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
-
-両方のシリアライザーは再利用した `IBufferWriter<byte>` に書き込みました。System.Text.Json は source generation、camelCase 命名、`UnsafeRelaxedJsonEscaping`、required メンバー検査、nullable 注釈検査を使いました。リクエスト JSON は計測区間の前に用意し、両シリアライザーが required プロパティの欠落と非 nullable プロパティへの null をどちらも拒否することを setup で確認しました。バッファ拡張のケースは各操作の中で 16 バイトのバッファを作りました。
-
-合同のシリアライザー計測中、ホスト上で他の CPU 負荷の高いプロセスが動いていました。JIT の小さな DTO、DTO 100 件のリスト、リクエストバインドのケースは、それぞれのペアが近い条件で走るようカテゴリフィルターで測り直しました。JIT の表は、この 3 ケースにその個別計測を、残り 5 ケースに合同計測を使っています。NativeAOT の表は合同計測を使っています。
-
-合格条件は、JIT と NativeAOT の両方で、すべてのシナリオにおいて Miya の平均時間と割り当てバイト数が System.Text.Json 以下であることです。これらの結果は JIT と NativeAOT の全 16 ケースで合格しました。割り当てバイト数はすべてのシナリオで System.Text.Json 以下でした。
-
-JIT の結果:
-
-| シナリオ | Miya 平均 | STJ 平均 | Miya 割り当て | STJ 割り当て |
-| --- | ---: | ---: | ---: | ---: |
-| 小さな DTO | 57.44 ns | 66.05 ns | 0 B | 0 B |
-| DTO 100 件のリスト | 3,199.00 ns | 5,098.00 ns | 0 B | 0 B |
-| ネストした DTO | 287.98 ns | 417.10 ns | 0 B | 0 B |
-| エスケープの多い文字列 | 2,426.97 ns | 2,766.74 ns | 0 B | 0 B |
-| 32 KiB の文字列 | 5,785.73 ns | 7,026.45 ns | 0 B | 0 B |
-| 整数中心の DTO | 2,273.23 ns | 2,936.68 ns | 0 B | 0 B |
-| リクエストバインド | 654.98 ns | 1,090.29 ns | 280 B | 872 B |
-| バッファ拡張 | 5,780.44 ns | 16,059.42 ns | 32,880 B | 98,591 B |
-
-NativeAOT の結果:
-
-| シナリオ | Miya 平均 | STJ 平均 | Miya 割り当て | STJ 割り当て |
-| --- | ---: | ---: | ---: | ---: |
-| 小さな DTO | 45.97 ns | 58.77 ns | 0 B | 0 B |
-| DTO 100 件のリスト | 7,577.34 ns | 9,414.40 ns | 0 B | 0 B |
-| ネストした DTO | 219.01 ns | 420.45 ns | 0 B | 0 B |
-| エスケープの多い文字列 | 2,372.24 ns | 2,772.62 ns | 0 B | 0 B |
-| 32 KiB の文字列 | 3,984.00 ns | 5,925.40 ns | 0 B | 0 B |
-| 整数中心の DTO | 2,745.76 ns | 4,106.62 ns | 0 B | 0 B |
-| リクエストバインド | 635.99 ns | 980.47 ns | 280 B | 872 B |
-| バッファ拡張 | 6,472.62 ns | 19,709.85 ns | 32,880 B | 98,602 B |
-
-SpanJson 4.2.1 は JIT で別に計測しました。API が同じ `IBufferWriter<byte>` の契約に書き込むのではなく新しい `byte[]` を返すためです。合否の基準ではなく参考値です。
-
-| シナリオ | SpanJson 平均 | 割り当て |
-| --- | ---: | ---: |
-| 小さな DTO | 50.71 ns | 64 B |
-| DTO 100 件のリスト | 8,266.02 ns | 4,256 B |
-| ネストした DTO | 228.06 ns | 168 B |
-| エスケープの多い文字列 | 5,593.79 ns | 1,568 B |
-| 32 KiB の文字列 | 39,181.72 ns | 32,800 B |
-| 整数中心の DTO | 6,726.19 ns | 1,032 B |
-| リクエストバインド | 194.46 ns | 280 B |
-
-Miya の JIT 平均は、この 7 つの参考シナリオのうち 4 つで下回りました。SpanJson の平均は、小さな DTO、ネストした DTO、リクエストバインドのケースで下回りました。
-
-### ルーティングとミドルウェアパイプライン
-
-ルーティングのベンチマークは 10 個のルートを登録します。ハーネスは `Context` と最小限のインメモリ HTTP feature コレクションを再利用し、操作ごとにリセットして、`Build()` が返すハンドラーを呼びます。ソケットと Kestrel は含みません。
-
-| ルートの結果 | JIT 平均 | JIT 割り当て | NativeAOT 平均 | NativeAOT 割り当て |
-| --- | ---: | ---: | ---: | ---: |
-| 静的ヒット | 261.8 ns | 0 B | 366.8 ns | 0 B |
-| `:param` ヒット | 342.2 ns | 0 B | 374.8 ns | 0 B |
-| ワイルドカードヒット | 258.9 ns | 0 B | 345.7 ns | 0 B |
-| 404 ミス | 291.6 ns | 96 B | 394.6 ns | 96 B |
-| 405 メソッド不一致 | 412.2 ns | 320 B | 639.8 ns | 320 B |
-
-パイプラインのベンチマークは同じハーネスと静的なルートハンドラーを使います。
-
-| ミドルウェア数 | JIT 平均 | JIT 割り当て | NativeAOT 平均 | NativeAOT 割り当て |
-| ---: | ---: | ---: | ---: | ---: |
-| 0 | 208.3 ns | 0 B | 259.8 ns | 0 B |
-| 5 | 330.9 ns | 0 B | 426.8 ns | 0 B |
-
-ベンチマークのコマンドは次のとおりです。
-
-```sh
-dotnet build benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj -c Release
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --filter '*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
-  --jit-only --filter '*SmallDto*' '*RequestBind*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
-  --jit-only --filter '*List100*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --routing
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --spanjson
-```
 
 ## v0 の制限
 
@@ -533,12 +442,10 @@ Miya v0 は、WebSocket のアップグレードと静的ファイルの配信�
 
 Miya の設計は、他のフレームワークやライブラリを参考にしています。
 
-- [Hono](https://hono.dev) は表層の API を形作りました。コンテキストオブジェクト（`c.Text`、`c.Json`、`c.Param`）、`:name` と `*name` のルート構文、onion 順のミドルウェア、Hono の `Hono<Env>` に対応する型付き `App<TContext>` です。
+- [Hono](https://hono.dev) の API 設計を参考にしています。コンテキストオブジェクト（`c.Text`、`c.Json`、`c.Param`）、`:name` と `*name` のルート構文、onion 順のミドルウェア、Hono の `Hono<Env>` に対応する型付き `App<TContext>` です。
 - [zod](https://zod.dev) は、型付き入力のコード定義バリデーションの参考です。
-- JSON シリアライザーは [MessagePack-CSharp](https://github.com/MessagePack-CSharp/MessagePack-CSharp) と [MemoryPack](https://github.com/Cysharp/MemoryPack) の考え方に沿っています。`IBufferWriter<byte>` の上の `ref struct` ライター、ソース生成の codec、実行時ディスパッチではなく module initializer による登録です。性能改善は、河合宜文（neuecc）が [neue.cc](https://neue.cc/2026/07/06_highperformancecode_with_ai.html) で示すベンチマーク駆動の方法に従いました。
+- JSON シリアライザーは [MessagePack-CSharp](https://github.com/MessagePack-CSharp/MessagePack-CSharp) と [MemoryPack](https://github.com/Cysharp/MemoryPack) の考え方に沿っています。`IBufferWriter<byte>` の上の `ref struct` ライター、ソース生成の codec、実行時ディスパッチではなく module initializer による登録です。
 - Miya は ASP.NET Core の [Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel) の上で動きます。
-
-これらは設計上の影響への謝辞です。Miya はこれらのプロジェクトのコードを含みません。移植したコードがあれば [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) に記載します。
 
 ## ライセンス
 
