@@ -62,6 +62,7 @@ internal static class GeneratorTestHelper
             [
                 typeof(Miya.App).Assembly.Location,
                 typeof(Miya.Json.Json).Assembly.Location,
+                typeof(Miya.Schema.Schemas).Assembly.Location,
             ])
             .Distinct(StringComparer.Ordinal);
         return paths.Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToImmutableArray();

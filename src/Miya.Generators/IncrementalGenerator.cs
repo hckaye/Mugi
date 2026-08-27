@@ -36,7 +36,7 @@ public sealed class IncrementalGenerator : IIncrementalGenerator
             .WithTrackingName("MiyaCallSites");
 
         var jsonTypes = analyses
-            .Where(static analysis => analysis.JsonType is not null)
+            .Where(static analysis => analysis.JsonType is not null || analysis.SchemaDefinition is not null)
             .Select(static (analysis, _) => new JsonInvocationCandidate(analysis))
             .WithComparer(JsonInvocationCandidateComparer.Instance)
             .WithTrackingName("MiyaJsonTypes");
@@ -68,6 +68,27 @@ public sealed class IncrementalGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(
             routeSources,
             static (productionContext, source) => AddSource(productionContext, source));
+
+        var schemaGeneration = analyses.Collect().Combine(settings)
+            .Select(static (pair, _) =>
+                GeneratorCore.GenerateIncrementalSchemaSources(pair.Left, pair.Right))
+            .WithTrackingName("MiyaSchemaGeneration");
+        var schemaSources = schemaGeneration
+            .SelectMany(static (result, _) => result.Sources)
+            .WithComparer(GeneratedSourceComparer.Instance)
+            .WithTrackingName("MiyaSchemaSources");
+        context.RegisterSourceOutput(
+            schemaSources,
+            static (productionContext, source) => AddSource(productionContext, source));
+        context.RegisterSourceOutput(
+            schemaGeneration,
+            static (productionContext, result) =>
+            {
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    productionContext.ReportDiagnostic(diagnostic);
+                }
+            });
 
         var interceptorSources = analyses.Combine(settings)
             .Select(static (pair, _) =>

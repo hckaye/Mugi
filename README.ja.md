@@ -4,11 +4,11 @@
 
 Miya は高速でシンプルな .NET 向け HTTP フレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行い、`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
 
-Miya は NativeAOT のために作られています。実行時にリフレクション、アセンブリスキャン、実行時コード生成を一切使わないので、publish したアプリは数ミリ秒で起動し、小さな単一バイナリになります。ルーティングと JSON はソースジェネレーターがコンパイル時に用意します。ジェネレーターを自分で呼ぶことはなく、パッケージを参照するだけで動きます。
+Miya は NativeAOT のために作られています。実行時にリフレクション、アセンブリスキャン、実行時コード生成を一切使わないので、publish したアプリは数ミリ秒で起動し、小さな単一バイナリになります。ルーティング、JSON、型付き入力のバインダーはソースジェネレーターがコンパイル時に用意します。ジェネレーターを自分で呼ぶことはなく、パッケージを参照するだけで動きます。
 
 ## インストール
 
-ランタイムパッケージとジェネレーターパッケージを追加します。ジェネレーターはビルド中に動き、アプリのルーティングと JSON のコードを生成します。
+ランタイムパッケージとジェネレーターパッケージを追加します。型付き入力を使う場合は `Miya.Schema` も追加します。ジェネレーターはビルド中に動き、ルーティング、JSON、型付き入力のコードを生成します。
 
 ```xml
 <PropertyGroup>
@@ -19,17 +19,21 @@ Miya は NativeAOT のために作られています。実行時にリフレク�
 
 <ItemGroup>
   <PackageReference Include="Miya" Version="1.0.0" />
+  <PackageReference Include="Miya.Schema" Version="1.0.0" />
   <PackageReference Include="Miya.Generators" Version="1.0.0" />
 </ItemGroup>
 ```
 
 `InterceptorsNamespaces` の行は必須です。これによりジェネレーターは、認識できる呼び出しをより速い直接呼び出しに置き換えられます。`Miya.Generators` パッケージには、analyzer としてのジェネレーターと、この設定を自動で行う `buildTransitive` の props ファイルが入っています。パッケージが別のプロジェクト参照を経由して届く場合も同じです。
 
+`Miya.Schema` は別パッケージです。型付き入力と検証を使うアプリで参照します。
+
 リポジトリ内でプロジェクトを直接参照するときは、ジェネレーターを analyzer としてコンパイラに渡します。
 
 ```xml
 <ItemGroup>
   <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
+  <ProjectReference Include="../Miya/src/Miya.Schema/Miya.Schema.csproj" />
   <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
                     OutputItemType="Analyzer"
                     ReferenceOutputAssembly="false" />
@@ -114,6 +118,47 @@ app.Post("/users", CreateUser);
 - どのルートにも一致しないパスは 404 を返します。`app.NotFound(handler)` で独自のものを登録できます。
 
 照合は Kestrel がすでにデコードしたパスを ordinal 比較で使います。エンコードされたスラッシュ（`%2F`）は照合中はエンコードのままなので、`/items/a%2Fb` は `/items/:id` に一致し、`c.Param("id")` がそれを `a/b` にデコードします。不正なパーセントエスケープは 400 を返します。`/users` と `/users/` は別のルートで、v0 では両者の間でリダイレクトしません。
+
+## 型付き入力と検証
+
+`Miya.Schema` は、ルートパラメータ、クエリ、ヘッダー、JSON body のフィールドを 1 つの入力 record にまとめます。パースと検証が成功した場合だけハンドラーを呼びます。
+
+```csharp
+using Miya.Schema;
+
+var searchSchema = Schemas.For<SearchInput>()
+    .Query(input => input.Limit, rules => rules.Default(20).Range(1, 100));
+
+app.Get("/search/:Page", searchSchema,
+    static (c, input) => c.Json(input));
+
+var personSchema = Schemas.For<CreatePersonInput>()
+    .Body(input => input.Name, rules => rules.NotEmpty().MaxLength(80))
+    .Body(input => input.Age, rules => rules.Range(0, 120))
+    .Body(input => input.Note, rules => rules.Optional());
+
+app.Post("/people", personSchema,
+    static (c, input) => c.Json(input));
+
+public sealed record SearchInput(int Page, string Query, int Limit);
+public sealed record CreatePersonInput(string Name, int Age, string? Note);
+```
+
+明示した `Route`、`Query`、`Body`、`Header` の割り当てを優先します。明示していないフィールドは、名前が `:parameter` と完全に一致すればルートから取得します。それ以外は、`POST`、`PUT`、`PATCH` では JSON body から、他のメソッドではクエリから取得します。名前は ordinal かつ大文字と小文字を区別して比較します。`Header` には HTTP ヘッダー名も渡します。たとえば `.Header(input => input.RequestId, "X-Request-Id")` と書きます。
+
+テキスト値はプリミティブ、`string`、`Guid`、Boolean、enum の名前または数値、`DateTime`、`DateTimeOffset` に対応します。body のフィールドは Miya の生成済み JSON codec で読みます。ジェネレーターはフィールドセレクターと検証規則をビルド時に読みます。実行時にセレクターを呼んだり、式木をコンパイルしたりはしません。
+
+検証規則はチェーンできます。数値には `Min`、`Max`、`Range`、`Positive`、`NonNegative`、文字列には `NotEmpty`、`Length`、`MinLength`、`MaxLength`、`Pattern` を使えます。すべてのフィールドで `Optional`、`Default`、`Must` を使えます。
+
+必須値の欠落、パース失敗、不正な JSON body、検証失敗ではハンドラーを呼ばず 400 を返します。`Content-Type` は `application/json` で、body は次の形です。
+
+```json
+{
+  "errors": [
+    { "field": "age", "message": "must be between 0 and 120" }
+  ]
+}
+```
 
 ## ミドルウェア
 
@@ -447,11 +492,11 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 の制限
 
-Miya v0 は、WebSocket のアップグレード、静的ファイルの配信、OpenAPI ドキュメントの生成に対応しません。認証、バリデーション、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは選択肢として使えます。
+Miya v0 は、WebSocket のアップグレード、静的ファイルの配信、OpenAPI ドキュメントの生成に対応しません。認証、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは選択肢として使えます。
 
 ルートのジェネレーターは、リテラルのパターンをコンパイル時に検証・解析し、解析済みのテンプレートを埋め込みます。照合はランタイムマッチャーが行います。ルート単位の照合コードや統合した trie はまだ出力しません。
 
-診断 MIYA001 から MIYA004 は、匿名 JSON 型、不正なルート、限定的な重複ルート検出、非対応の JSON 型を扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
+診断 MIYA001 から MIYA004 は JSON とルートの生成を扱います。MIYA006 はリテラルの `c.Param` 呼び出しをハンドラーのルートと照合します。MIYA010 から MIYA015 は、型付き入力のルート割り当て、対応するフィールド型、スキーマ定義、検証規則、競合する割り当てを扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
 
 ## ライセンス
 

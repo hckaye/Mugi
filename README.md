@@ -4,11 +4,11 @@ English | [日本語](README.ja.md)
 
 Miya is a fast, simple HTTP framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, read the request and write the response through one context object, and run on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
-Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing and JSON are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
+Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing, JSON, and typed input binders are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
 
 ## Install
 
-Add the runtime package and the generator package. The generator runs during the build and produces the routing and JSON code for your app.
+Add the runtime package and the generator package. Add `Miya.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
 
 ```xml
 <PropertyGroup>
@@ -19,17 +19,21 @@ Add the runtime package and the generator package. The generator runs during the
 
 <ItemGroup>
   <PackageReference Include="Miya" Version="1.0.0" />
+  <PackageReference Include="Miya.Schema" Version="1.0.0" />
   <PackageReference Include="Miya.Generators" Version="1.0.0" />
 </ItemGroup>
 ```
 
 The `InterceptorsNamespaces` line is required. It lets the generator replace the calls it recognizes with faster direct calls. The `Miya.Generators` package carries the generator as an analyzer and a `buildTransitive` props file that sets this up automatically, including when the package arrives through another project reference.
 
+`Miya.Schema` is a separate package. Keep it only when the application uses typed input and validation.
+
 When you reference the projects directly in a repository, pass the generator to the compiler as an analyzer:
 
 ```xml
 <ItemGroup>
   <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
+  <ProjectReference Include="../Miya/src/Miya.Schema/Miya.Schema.csproj" />
   <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
                     OutputItemType="Analyzer"
                     ReferenceOutputAssembly="false" />
@@ -114,6 +118,47 @@ Method and path handling follows HTTP:
 - Any unmatched path returns 404. Register your own with `app.NotFound(handler)`.
 
 Matching uses the path Kestrel already decoded, compared by ordinal. An encoded slash (`%2F`) stays encoded during matching, so `/items/a%2Fb` matches `/items/:id`; `c.Param("id")` then decodes it to `a/b`. An invalid percent escape returns 400. `/users` and `/users/` are different routes, and v0 does not redirect between them.
+
+## Typed input and validation
+
+`Miya.Schema` combines route parameters, query values, headers, and JSON body fields in one input record. The handler runs only after parsing and validation succeed.
+
+```csharp
+using Miya.Schema;
+
+var searchSchema = Schemas.For<SearchInput>()
+    .Query(input => input.Limit, rules => rules.Default(20).Range(1, 100));
+
+app.Get("/search/:Page", searchSchema,
+    static (c, input) => c.Json(input));
+
+var personSchema = Schemas.For<CreatePersonInput>()
+    .Body(input => input.Name, rules => rules.NotEmpty().MaxLength(80))
+    .Body(input => input.Age, rules => rules.Range(0, 120))
+    .Body(input => input.Note, rules => rules.Optional());
+
+app.Post("/people", personSchema,
+    static (c, input) => c.Json(input));
+
+public sealed record SearchInput(int Page, string Query, int Limit);
+public sealed record CreatePersonInput(string Name, int Age, string? Note);
+```
+
+An explicit `Route`, `Query`, `Body`, or `Header` mapping takes precedence. An unmapped field whose name exactly matches a `:parameter` name comes from the route. Other unmapped fields come from the JSON body for `POST`, `PUT`, and `PATCH`, and from the query string for other methods. Name matching is ordinal and case-sensitive. `Header` also takes the HTTP header name, for example `.Header(input => input.RequestId, "X-Request-Id")`.
+
+Text values support primitives, `string`, `Guid`, Boolean values, enum names or numbers, `DateTime`, and `DateTimeOffset`. Body fields use Miya's generated JSON codecs. The generator reads the field selectors and rule declarations at build time; the runtime does not invoke those selectors or compile expression trees.
+
+Rules can be chained. Numeric fields support `Min`, `Max`, `Range`, `Positive`, and `NonNegative`. Strings support `NotEmpty`, `Length`, `MinLength`, `MaxLength`, and `Pattern`. Every field supports `Optional`, `Default`, and `Must`.
+
+A missing required value, parse failure, invalid JSON body, or failed rule returns 400 without calling the handler. The response has `Content-Type: application/json` and this shape:
+
+```json
+{
+  "errors": [
+    { "field": "age", "message": "must be between 0 and 120" }
+  ]
+}
+```
 
 ## Middleware
 
@@ -447,11 +492,11 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 limitations
 
-Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, validation, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
+Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
 
 The route generator validates and parses literal patterns at compile time and embeds the parsed templates; the runtime matcher does the matching. It does not yet emit route-specific matching code or a combined trie.
 
-Diagnostics MIYA001 through MIYA004 cover anonymous JSON types, invalid routes, limited duplicate-route detection, and unsupported JSON types. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
+Diagnostics MIYA001 through MIYA004 cover JSON and route generation. MIYA006 checks literal `c.Param` calls against their handler's route. MIYA010 through MIYA015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
 ## License
 
