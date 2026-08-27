@@ -18,8 +18,8 @@ Add the runtime package and the generator package. The generator runs during the
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Miya" Version="1.0.0" />
-  <PackageReference Include="Miya.Generators" Version="1.0.0" />
+  <PackageReference Include="Miya" Version="0.1.0" />
+  <PackageReference Include="Miya.Generators" Version="0.1.0" />
 </ItemGroup>
 ```
 
@@ -250,7 +250,7 @@ As a build-time optimization, Miya replaces the `c.Json` and route calls it reco
 Some build setups cannot run compiler-integrated source generators. `miya-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
 
 ```sh
-dotnet tool install --global Miya.Gen --version 1.0.0
+dotnet tool install --global Miya.Gen --version 0.1.0
 dotnet build MyApp.csproj
 miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj

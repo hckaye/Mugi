@@ -18,8 +18,8 @@ Miya は NativeAOT のために作られています。実行時にリフレク�
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Miya" Version="1.0.0" />
-  <PackageReference Include="Miya.Generators" Version="1.0.0" />
+  <PackageReference Include="Miya" Version="0.1.0" />
+  <PackageReference Include="Miya.Generators" Version="0.1.0" />
 </ItemGroup>
 ```
 
@@ -250,7 +250,7 @@ NaN と Infinity は既定で拒否します。`JsonOptions` は、時間のか�
 ビルド構成によっては、コンパイラ統合のソースジェネレーターを動かせません。`miya-gen` は、同じ JSON とルーティングのコードを通常の `.cs` ファイルとして、ビルドの一手順で生成します。interceptors の最適化は出力しないので、直接呼び出しによる高速化だけがなくなります。挙動は同じです。
 
 ```sh
-dotnet tool install --global Miya.Gen --version 1.0.0
+dotnet tool install --global Miya.Gen --version 0.1.0
 dotnet build MyApp.csproj
 miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
