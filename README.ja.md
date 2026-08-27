@@ -8,11 +8,13 @@ Miya は NativeAOT のために作られています。実行時にリフレク�
 
 ## インストール
 
+Miya のパッケージは `net9.0` を対象にし、.NET 9 以降で動きます。アプリのビルドには .NET 9 以降の SDK が必要です。ジェネレーターが、そのリリースで安定版になった C# のインターセプターを使うためです。
+
 ランタイムパッケージとジェネレーターパッケージを追加します。型付き入力を使う場合は `Miya.Schema` も追加します。ジェネレーターはビルド中に動き、ルーティング、JSON、型付き入力のコードを生成します。
 
 ```xml
 <PropertyGroup>
-  <TargetFramework>net10.0</TargetFramework>
+  <TargetFramework>net9.0</TargetFramework>
   <PublishAot>true</PublishAot>
   <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
 </PropertyGroup>

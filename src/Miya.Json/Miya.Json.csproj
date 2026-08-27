@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
     <PackageId>Miya.Json</PackageId>
     <Description>The Native AOT-compatible JSON serializer used by Miya.</Description>

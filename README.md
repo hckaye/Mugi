@@ -8,11 +8,13 @@ Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scann
 
 ## Install
 
+Miya's packages target `net9.0` and run on .NET 9 or later. Building an app needs the .NET 9 SDK or newer, because the generator uses stable C# interceptors that shipped in that release.
+
 Add the runtime package and the generator package. Add `Miya.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
 
 ```xml
 <PropertyGroup>
-  <TargetFramework>net10.0</TargetFramework>
+  <TargetFramework>net9.0</TargetFramework>
   <PublishAot>true</PublishAot>
   <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
 </PropertyGroup>
