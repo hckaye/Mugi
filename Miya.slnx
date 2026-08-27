@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj" />
+    <Project Path="benchmarks/Miya.LoadBench/Miya.LoadBench.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Hello/Hello.csproj" />
