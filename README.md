@@ -1,5 +1,7 @@
 # Miya
 
+English | [日本語](README.ja.md)
+
 Miya is a small HTTP framework for .NET 10 designed around NativeAOT. Applications do not require `WebApplication`, the Generic Host, or a DI container. Miya constructs Kestrel directly for cleartext HTTP/1.1 and HTTP/2, and uses Kestrel's built-in service registration internally for TLS and HTTP/3. The runtime performs no reflection, assembly scanning, or runtime code generation. Handlers are lambdas rather than attributed controller methods.
 
 Route templates and JSON codecs are generated at compile time. The routing generator validates literal patterns and embeds parsed templates; v0 still uses the shared runtime matcher. Generated JSON codecs register themselves through module initializers. The request API follows a context model with `Text`, `Json`, `Param`, and `Query` methods. Middleware is composed in onion order around the selected route.
