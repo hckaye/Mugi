@@ -35,13 +35,53 @@ public static class MiyaJson
         writer.Flush();
     }
 
+    /// <summary>Serializes with an explicitly supplied codec.</summary>
+    public static void Serialize<T>(
+        IBufferWriter<byte> destination,
+        T value,
+        IMiyaJsonCodec<T> codec,
+        MiyaJsonOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(codec);
+        var writer = new MiyaJsonWriter(destination, options ?? MiyaJsonOptions.Default);
+        codec.Write(ref writer, value);
+        writer.Flush();
+    }
+
     /// <summary>Deserializes <typeparamref name="T"/> from a complete UTF-8 JSON document.</summary>
     public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json, MiyaJsonOptions? options = null)
     {
         var reader = new MiyaJsonReader(utf8Json, options ?? MiyaJsonOptions.Default);
-        var value = GetCodec<T>().Read(ref reader);
-        reader.ExpectEnd();
-        return value;
+        try
+        {
+            var value = GetCodec<T>().Read(ref reader);
+            reader.ExpectEnd();
+            return value;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    /// <summary>Deserializes with an explicitly supplied codec.</summary>
+    public static T? Deserialize<T>(
+        ReadOnlySpan<byte> utf8Json,
+        IMiyaJsonCodec<T> codec,
+        MiyaJsonOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(codec);
+        var reader = new MiyaJsonReader(utf8Json, options ?? MiyaJsonOptions.Default);
+        try
+        {
+            var value = codec.Read(ref reader);
+            reader.ExpectEnd();
+            return value;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
     }
 
     private static MiyaJsonException MissingCodec<T>() => new(

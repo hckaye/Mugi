@@ -22,4 +22,8 @@
     <ProjectReference Include="..\..\src\Miya.Json\Miya.Json.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="TestData\JSONTestSuite\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
