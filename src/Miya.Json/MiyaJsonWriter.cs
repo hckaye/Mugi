@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Buffers.Text;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Unicode;
 
 namespace Miya.Json;
@@ -11,6 +13,8 @@ public ref struct MiyaJsonWriter
     private static readonly SearchValues<char> CharactersToEscape = SearchValues.Create(
         "\"\\\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000A\u000B\u000C\u000D\u000E\u000F" +
         "\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F");
+    private static readonly SearchValues<byte> Utf8BytesToEscape = SearchValues.Create(
+        "\"\\\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000A\u000B\u000C\u000D\u000E\u000F\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F"u8);
 
     private readonly IBufferWriter<byte> _destination;
     private readonly MiyaJsonOptions _options;
@@ -34,6 +38,12 @@ public ref struct MiyaJsonWriter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteRaw(scoped ReadOnlySpan<byte> utf8)
     {
+        if (utf8.Length == 1)
+        {
+            WriteByte(utf8[0]);
+            return;
+        }
+
         EnsureDocumentCapacity(utf8.Length);
         utf8.CopyTo(GetWriteSpan(utf8.Length));
         _pendingBytes += utf8.Length;
@@ -56,20 +66,58 @@ public ref struct MiyaJsonWriter
 
     public void WriteString(scoped ReadOnlySpan<char> value)
     {
-        int maximumLength;
-        try
+        const int maximumChunkCharacters = 2048;
+        EnsureStringCapacity(value.Length);
+        WriteByte((byte)'"');
+        if (value.Length > maximumChunkCharacters)
         {
-            maximumLength = checked((value.Length * 6) + 2);
-        }
-        catch (OverflowException exception)
-        {
-            throw new MiyaJsonException("The string is too large to encode as JSON.", exception);
+            var destination = GetWriteSpan(value.Length);
+            var asciiStatus = Ascii.FromUtf16(value, destination, out var bytesWritten);
+            if (asciiStatus == OperationStatus.Done &&
+                destination[..bytesWritten].IndexOfAny(Utf8BytesToEscape) < 0)
+            {
+                EnsureStringCapacity(bytesWritten);
+                EnsureDocumentCapacity(bytesWritten);
+                _pendingBytes += bytesWritten;
+                WriteByte((byte)'"');
+                return;
+            }
+
+            if (asciiStatus != OperationStatus.Done && value.IndexOfAny(CharactersToEscape) < 0)
+            {
+                int maximumEncodedLength;
+                try
+                {
+                    maximumEncodedLength = checked(value.Length * 3);
+                }
+                catch (OverflowException exception)
+                {
+                    throw new MiyaJsonException("The string is too large to encode as UTF-8.", exception);
+                }
+
+                destination = GetWriteSpan(maximumEncodedLength);
+                var utf8Status = Utf8.FromUtf16(
+                    value,
+                    destination,
+                    out var charsRead,
+                    out bytesWritten,
+                    replaceInvalidSequences: false,
+                    isFinalBlock: true);
+                if (utf8Status != OperationStatus.Done || charsRead != value.Length)
+                {
+                    throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+                }
+
+                EnsureStringCapacity(bytesWritten);
+                EnsureDocumentCapacity(bytesWritten);
+                _pendingBytes += bytesWritten;
+                WriteByte((byte)'"');
+                return;
+            }
         }
 
-        var destination = GetWriteSpan(maximumLength);
-        var written = 0;
-        destination[written++] = (byte)'"';
         var remaining = value;
+        var totalEncodedLength = 0;
         var charactersUntilCancellationCheck = 0;
 
         while (!remaining.IsEmpty)
@@ -80,55 +128,126 @@ public ref struct MiyaJsonWriter
                 charactersUntilCancellationCheck = 16 * 1024;
             }
 
-            var escapeIndex = remaining.IndexOfAny(CharactersToEscape);
-            var safeLength = escapeIndex < 0 ? remaining.Length : escapeIndex;
-            if (safeLength != 0)
+            var chunkLength = Math.Min(remaining.Length, maximumChunkCharacters);
+            if (chunkLength < remaining.Length && char.IsHighSurrogate(remaining[chunkLength - 1]))
             {
-                var status = Utf8.FromUtf16(
-                    remaining[..safeLength],
-                    destination[written..],
-                    out var charsRead,
-                    out var bytesWritten,
-                    replaceInvalidSequences: false,
-                    isFinalBlock: true);
-                if (status != OperationStatus.Done || charsRead != safeLength)
+                chunkLength++;
+            }
+
+            var chunk = remaining[..chunkLength];
+            int maximumEncodedLength;
+            try
+            {
+                maximumEncodedLength = checked(chunkLength * 6);
+            }
+            catch (OverflowException exception)
+            {
+                throw new MiyaJsonException("The string is too large to encode as JSON.", exception);
+            }
+
+            var destination = GetWriteSpan(maximumEncodedLength);
+            var written = EncodeStringChunk(chunk, destination);
+            if (written > _options.MaxStringByteLength - totalEncodedLength)
+            {
+                throw new MiyaJsonException(
+                    $"The encoded string exceeds the {_options.MaxStringByteLength}-byte limit.");
+            }
+
+            totalEncodedLength += written;
+            EnsureDocumentCapacity(written);
+            _pendingBytes += written;
+            remaining = remaining[chunkLength..];
+            charactersUntilCancellationCheck -= chunkLength;
+        }
+
+        WriteByte((byte)'"');
+    }
+
+    private static int EncodeStringChunk(ReadOnlySpan<char> value, Span<byte> destination)
+    {
+        if (value.IndexOfAny(CharactersToEscape) >= 0)
+        {
+            return EncodeEscapedStringChunk(value, destination);
+        }
+
+        if (value.Length <= 32)
+        {
+            for (var index = 0; index < value.Length; index++)
+            {
+                var character = value[index];
+                if (character > 0x7F)
                 {
-                    throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+                    break;
                 }
 
-                written += bytesWritten;
-                remaining = remaining[safeLength..];
-                charactersUntilCancellationCheck -= safeLength;
+                destination[index] = (byte)character;
+                if (index == value.Length - 1)
+                {
+                    return value.Length;
+                }
             }
+        }
 
-            if (escapeIndex < 0)
+        var status = Utf8.FromUtf16(
+            value,
+            destination,
+            out var charsRead,
+            out var bytesWritten,
+            replaceInvalidSequences: false,
+            isFinalBlock: true);
+        if (status != OperationStatus.Done || charsRead != value.Length)
+        {
+            throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+        }
+
+        return bytesWritten;
+    }
+
+    private static int EncodeEscapedStringChunk(ReadOnlySpan<char> value, Span<byte> destination)
+    {
+        Span<byte> utf8 = stackalloc byte[value.Length * 3];
+        var status = Utf8.FromUtf16(
+            value,
+            utf8,
+            out var charsRead,
+            out var bytesWritten,
+            replaceInvalidSequences: false,
+            isFinalBlock: true);
+        if (status != OperationStatus.Done || charsRead != value.Length)
+        {
+            throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+        }
+
+        var written = 0;
+        for (var index = 0; index < bytesWritten; index++)
+        {
+            var character = utf8[index];
+            if (character >= 0x20 && character != (byte)'"' && character != (byte)'\\')
             {
-                break;
+                destination[written++] = character;
+                continue;
             }
 
-            var character = remaining[0];
-            remaining = remaining[1..];
-            charactersUntilCancellationCheck--;
             destination[written++] = (byte)'\\';
             switch (character)
             {
-                case '"':
-                case '\\':
+                case (byte)'"':
+                case (byte)'\\':
                     destination[written++] = (byte)character;
                     break;
-                case '\b':
+                case (byte)'\b':
                     destination[written++] = (byte)'b';
                     break;
-                case '\f':
+                case (byte)'\f':
                     destination[written++] = (byte)'f';
                     break;
-                case '\n':
+                case (byte)'\n':
                     destination[written++] = (byte)'n';
                     break;
-                case '\r':
+                case (byte)'\r':
                     destination[written++] = (byte)'r';
                     break;
-                case '\t':
+                case (byte)'\t':
                     destination[written++] = (byte)'t';
                     break;
                 default:
@@ -141,10 +260,7 @@ public ref struct MiyaJsonWriter
             }
         }
 
-        EnsureStringCapacity(written - 1);
-        destination[written++] = (byte)'"';
-        EnsureDocumentCapacity(written);
-        _pendingBytes += written;
+        return written;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -165,11 +281,22 @@ public ref struct MiyaJsonWriter
         _pendingBytes += written;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteNumber(long value)
     {
-        Span<byte> buffer = stackalloc byte[20];
-        var written = FormatInt64(value, buffer);
-        WriteRaw(buffer[..written]);
+        var negative = value < 0;
+        var magnitude = negative ? (ulong)(-(value + 1)) + 1 : (ulong)value;
+        var digitCount = CountUInt64Digits(magnitude);
+        var written = digitCount + (negative ? 1 : 0);
+        EnsureDocumentCapacity(written);
+        var destination = GetWriteSpan(written);
+        if (negative)
+        {
+            destination[0] = (byte)'-';
+        }
+
+        WriteUInt64Digits(magnitude, destination.Slice(written - digitCount, digitCount));
+        _pendingBytes += written;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -182,11 +309,14 @@ public ref struct MiyaJsonWriter
         _pendingBytes += written;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteNumber(ulong value)
     {
-        Span<byte> buffer = stackalloc byte[20];
-        var written = FormatUInt64(value, buffer);
-        WriteRaw(buffer[..written]);
+        var written = CountUInt64Digits(value);
+        EnsureDocumentCapacity(written);
+        var destination = GetWriteSpan(written);
+        WriteUInt64Digits(value, destination[..written]);
+        _pendingBytes += written;
     }
 
     public void WriteNumber(float value)
@@ -280,18 +410,6 @@ public ref struct MiyaJsonWriter
     private static ReadOnlySpan<byte> DigitPairs =>
         "00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899"u8;
 
-    private static int FormatInt64(long value, Span<byte> destination)
-    {
-        if (value >= 0)
-        {
-            return FormatUInt64((ulong)value, destination);
-        }
-
-        destination[0] = (byte)'-';
-        var magnitude = (ulong)(-(value + 1)) + 1;
-        return 1 + FormatUInt64(magnitude, destination[1..]);
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int CountUInt32Digits(uint value)
     {
@@ -348,40 +466,84 @@ public ref struct MiyaJsonWriter
         }
     }
 
-    private static int FormatUInt64(ulong value, Span<byte> destination)
+    private static ReadOnlySpan<ulong> UInt64PowersOfTen =>
+    [
+        1UL,
+        10UL,
+        100UL,
+        1_000UL,
+        10_000UL,
+        100_000UL,
+        1_000_000UL,
+        10_000_000UL,
+        100_000_000UL,
+        1_000_000_000UL,
+        10_000_000_000UL,
+        100_000_000_000UL,
+        1_000_000_000_000UL,
+        10_000_000_000_000UL,
+        100_000_000_000_000UL,
+        1_000_000_000_000_000UL,
+        10_000_000_000_000_000UL,
+        100_000_000_000_000_000UL,
+        1_000_000_000_000_000_000UL,
+        10_000_000_000_000_000_000UL,
+    ];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int CountUInt64Digits(ulong value)
     {
-        Span<byte> reversed = stackalloc byte[20];
-        var start = reversed.Length;
+        var digitCount = ((BitOperations.Log2(value | 1) * 1233) >> 12) + 1;
+        if (digitCount < 20 && value >= UInt64PowersOfTen[digitCount])
+        {
+            digitCount++;
+        }
+
+        return digitCount;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void WriteUInt64Digits(ulong value, Span<byte> destination)
+    {
+        var position = destination.Length;
         var pairs = DigitPairs;
 
         while (value >= 100)
         {
             var quotient = value / 100;
             var remainder = (int)(value - (quotient * 100));
-            start -= 2;
-            pairs.Slice(remainder * 2, 2).CopyTo(reversed[start..]);
+            position -= 2;
+            var pairIndex = remainder * 2;
+            destination[position] = pairs[pairIndex];
+            destination[position + 1] = pairs[pairIndex + 1];
             value = quotient;
         }
 
         if (value < 10)
         {
-            reversed[--start] = (byte)('0' + value);
+            destination[--position] = (byte)('0' + value);
         }
         else
         {
-            start -= 2;
-            pairs.Slice((int)value * 2, 2).CopyTo(reversed[start..]);
+            position -= 2;
+            var pairIndex = (int)value * 2;
+            destination[position] = pairs[pairIndex];
+            destination[position + 1] = pairs[pairIndex + 1];
         }
-
-        var length = reversed.Length - start;
-        reversed[start..].CopyTo(destination);
-        return length;
     }
 
     private static byte ToHex(byte value)
     {
         value &= 0x0F;
         return (byte)(value < 10 ? '0' + value : 'A' + value - 10);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void WriteByte(byte value)
+    {
+        EnsureDocumentCapacity(1);
+        GetWriteSpan(1)[0] = value;
+        _pendingBytes++;
     }
 
     private void EnsureStringCapacity(int encodedByteLength)
