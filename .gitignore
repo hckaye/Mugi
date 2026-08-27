@@ -1,0 +1,9 @@
+bin/
+obj/
+artifacts/
+BenchmarkDotNet.Artifacts/
+.worktrees/
+*.user
+.vs/
+.idea/
+.DS_Store

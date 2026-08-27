@@ -1,0 +1,5 @@
+Third-party notices for Miya
+
+No third-party code has been incorporated yet. When code is ported from another
+project, this file records for each file: the source file, commit, original
+authors, the applicable license, and its full text.

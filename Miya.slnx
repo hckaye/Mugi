@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Hello/Hello.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Miya.Gen/Miya.Gen.csproj" />
+    <Project Path="src/Miya.Generators.Core/Miya.Generators.Core.csproj" />
+    <Project Path="src/Miya.Generators/Miya.Generators.csproj" />
+    <Project Path="src/Miya.Json/Miya.Json.csproj" />
+    <Project Path="src/Miya/Miya.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Miya.Generators.Tests/Miya.Generators.Tests.csproj" />
+    <Project Path="tests/Miya.IntegrationTests/Miya.IntegrationTests.csproj" />
+    <Project Path="tests/Miya.Json.Tests/Miya.Json.Tests.csproj" />
+    <Project Path="tests/Miya.Tests/Miya.Tests.csproj" />
+  </Folder>
+</Solution>
