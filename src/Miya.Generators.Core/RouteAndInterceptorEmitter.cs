@@ -110,7 +110,15 @@ internal static class RouteAndInterceptorEmitter
         writer.Line("    this " + TypeNames.Display(receiverType) + " receiver,");
         writer.Line("    " + TypeNames.Display(method.Parameters[0].Type) + " value)");
         WriteConstraints(writer, typeParameters);
-        writer.Line("    => receiver.Json(value, " + TypeNames.CodecName(model.Type) + ".Instance);");
+
+        // The call site may have inferred an annotated reference type (User?). The codec is
+        // generated for the underlying type, so forward with the non-nullable type argument.
+        var typeArgument = method.TypeArguments[0];
+        var forgiveNull = typeArgument.IsReferenceType
+            && typeArgument.NullableAnnotation == NullableAnnotation.Annotated;
+        writer.Line(
+            "    => receiver.Json<" + TypeNames.NonNullableDisplay(typeArgument) + ">(value" +
+            (forgiveNull ? "!" : string.Empty) + ", " + TypeNames.CodecName(model.Type) + ".Instance);");
     }
 
     private static void EmitRouteInterceptor(

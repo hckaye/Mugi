@@ -95,26 +95,33 @@ internal static class InvocationAnalyzer
         var containingName = GetMetadataName(containingType);
         if (method.Name == "Json" && containingName == "Miya.Context" && method.Parameters.Length == 1)
         {
-            jsonType = method.TypeArguments[0];
+            jsonType = NormalizeTopLevelNullability(method.TypeArguments[0]);
             interceptJson = true;
             return true;
         }
 
         if (method.Name == "Json" && containingName == "Miya.Request" && method.Parameters.Length == 0)
         {
-            jsonType = method.TypeArguments[0];
+            jsonType = NormalizeTopLevelNullability(method.TypeArguments[0]);
             return true;
         }
 
         if (containingName == "Miya.Json.MiyaJson"
             && (method.Name == "Include" || method.Name == "Serialize" || method.Name == "Deserialize"))
         {
-            jsonType = method.TypeArguments[0];
+            jsonType = NormalizeTopLevelNullability(method.TypeArguments[0]);
             return true;
         }
 
         return false;
     }
+
+    // A call site inferring T as an annotated reference type (for example User?) must share the
+    // codec generated for the underlying type; codecs already accept null values.
+    private static ITypeSymbol NormalizeTopLevelNullability(ITypeSymbol type) =>
+        type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated
+            ? type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)
+            : type;
 
     private static bool TryGetRouteCall(
         SemanticModel semanticModel,

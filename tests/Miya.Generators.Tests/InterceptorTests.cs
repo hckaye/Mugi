@@ -68,6 +68,47 @@ public sealed class InterceptorTests
         Assert.Contains("this global::Miya.App<global::MyContext> receiver", generated, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Nullable_reference_call_sites_share_the_underlying_codec()
+    {
+        const string source = """
+            #nullable enable
+            using System.Threading.Tasks;
+            using Miya;
+
+            public sealed record Payload(int Id);
+            public static class Calls
+            {
+                public static ValueTask Write(Context context, Payload? value) => context.Json(value);
+                public static ValueTask WriteNonNull(Context context, Payload value) => context.Json(value);
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
+            .ToArray();
+        Assert.Empty(errors);
+
+        var codecs = run.Source("Miya.JsonCodecs.g.cs");
+        Assert.Equal(1, CountOccurrences(codecs, "sealed class Codec_global_003A__003A_Payload"));
+        Assert.DoesNotContain("_003F_", codecs, StringComparison.Ordinal);
+        Assert.Contains(".Json<global::Payload>(value!", run.Source("Miya.Interceptors.g.cs"), StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
+
     private static bool IsGeneratedInterceptor(MethodBase method)
     {
         return method.DeclaringType?.FullName == "Miya.Generated.MiyaInterceptors";
