@@ -10,6 +10,11 @@ internal static class ProgramEntry
 {
     internal static async Task<int> Run(string[] args)
     {
+        if (args.Length != 0 && args[0] == "import")
+        {
+            return await RunImport(args).ConfigureAwait(false);
+        }
+
         if (!TryParseArguments(args, out var options, out var argumentError))
         {
             Console.Error.WriteLine("miya-gen: " + argumentError);
@@ -125,6 +130,135 @@ internal static class ProgramEntry
             Console.Error.WriteLine("miya-gen: " + exception.Message);
             return 5;
         }
+    }
+
+    private static async Task<int> RunImport(string[] args)
+    {
+        if (!TryParseImportArguments(args, out var input, out var output, out var importNamespace, out var error))
+        {
+            Console.Error.WriteLine("miya-gen: " + error);
+            Console.Error.WriteLine(
+                "Usage: miya-gen import --input <openapi.json> --output <directory> [--namespace <namespace>]");
+            return 2;
+        }
+
+        var inputPath = Path.GetFullPath(input!);
+        var outputPath = Path.GetFullPath(output!);
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine("miya-gen: OpenAPI document does not exist: " + inputPath);
+            return 2;
+        }
+
+        try
+        {
+            var content = await File.ReadAllTextAsync(inputPath).ConfigureAwait(false);
+            var result = OpenApiImportGenerator.Generate(
+                new OpenApiImportInput(
+                    inputPath,
+                    content,
+                    string.IsNullOrWhiteSpace(importNamespace) ? "Generated" : importNamespace!,
+                    JsonNaming.CamelCase),
+                CancellationToken.None);
+
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                Console.Error.WriteLine(diagnostic.Severity + " " + diagnostic.Id + ": " + diagnostic.GetMessage());
+            }
+
+            if (result.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            {
+                Console.Error.WriteLine("miya-gen: import failed because the OpenAPI document has errors.");
+                return 4;
+            }
+
+            Directory.CreateDirectory(outputPath);
+            foreach (var oldFile in Directory.EnumerateFiles(
+                         outputPath,
+                         "Miya.OpenApi.*.g.cs",
+                         SearchOption.TopDirectoryOnly))
+            {
+                File.Delete(oldFile);
+            }
+
+            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            var baseName = SanitizeFileName(Path.GetFileNameWithoutExtension(inputPath));
+            var sources = result.Sources;
+            for (var index = 0; index < sources.Length; index++)
+            {
+                var suffix = sources.Length == 1 ? string.Empty : "." + index;
+                var destination = Path.Combine(outputPath, "Miya.OpenApi." + baseName + suffix + ".g.cs");
+                await File.WriteAllTextAsync(destination, sources[index].Source, encoding).ConfigureAwait(false);
+                Console.WriteLine(destination);
+            }
+
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine("miya-gen: " + exception.Message);
+            return 5;
+        }
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var builder = new StringBuilder(name.Length);
+        foreach (var character in name)
+        {
+            builder.Append(char.IsLetterOrDigit(character) ? character : '_');
+        }
+
+        return builder.Length == 0 ? "openapi" : builder.ToString();
+    }
+
+    private static bool TryParseImportArguments(
+        string[] args,
+        out string? input,
+        out string? output,
+        out string? importNamespace,
+        out string? error)
+    {
+        input = null;
+        output = null;
+        importNamespace = null;
+        error = null;
+        for (var index = 1; index < args.Length; index++)
+        {
+            var argument = args[index];
+            if (argument != "--input" && argument != "--output" && argument != "--namespace")
+            {
+                error = "unknown argument '" + argument + "'.";
+                return false;
+            }
+
+            if (++index >= args.Length)
+            {
+                error = "argument '" + argument + "' requires a value.";
+                return false;
+            }
+
+            switch (argument)
+            {
+                case "--input":
+                    input = args[index];
+                    break;
+                case "--output":
+                    output = args[index];
+                    break;
+                default:
+                    importNamespace = args[index];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(output))
+        {
+            error = "both --input and --output are required.";
+            return false;
+        }
+
+        return true;
     }
 
     private static ProjectSettings ReadProjectSettings(string projectPath, Project project)

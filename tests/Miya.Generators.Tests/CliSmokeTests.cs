@@ -113,6 +113,34 @@ public sealed class CliSmokeTests
         }
     }
 
+    [Fact]
+    public async Task Import_command_writes_generated_types()
+    {
+        var root = FindRepositoryRoot();
+        var fixture = Path.Combine(
+            root, "tests", "Miya.Generators.Tests", "fixtures", "OpenApiImport", "openapi.json");
+        var output = Path.Combine(Path.GetTempPath(), "miya-gen-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(output);
+        try
+        {
+            var generate = await Run(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "import", "--input", fixture, "--output", output, "--namespace", "Demo.Api");
+
+            Assert.Equal(0, generate.ExitCode);
+            var files = Directory.GetFiles(output, "Miya.OpenApi.*.g.cs");
+            Assert.NotEmpty(files);
+            var generated = await File.ReadAllTextAsync(files[0]);
+            Assert.Contains("namespace Demo.Api", generated, StringComparison.Ordinal);
+            Assert.Contains("public static partial class Paths", generated, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+        }
+    }
+
     private static async Task<ProcessResult> Run(string workingDirectory, params string[] arguments)
     {
         var result = await RunAllowingFailure(workingDirectory, arguments);

@@ -362,6 +362,12 @@ OpenAPI 3.0 と 3.1 の JSON に対応します。schema では object、string 
 
 合成 schema（`oneOf`、`anyOf`、`allOf`）、`additionalProperties`、外部参照、cookie parameter、JSON 以外の request body、`Miya.Schema` に対応する rule がない検証条件はスキップし、MIYA020 から MIYA023 の診断を出します。path と query parameter の名前は、生成される schema が同じ名前を使うため、有効な C# 識別子である必要があります。
 
+ソースジェネレーターを使えないビルド構成のために、`miya-gen import` が同じ取り込みを手動の一手順として行います。生成した `.g.cs` をコンパイルに入れるのではなくディスクに書き出します。
+
+```sh
+miya-gen import --input api/openapi.json --output Generated --namespace MyApp.Api
+```
+
 ## 型付きコンテキスト
 
 既定では、ハンドラーのコンテキストはリクエストとレスポンスのデータだけを運びます。自分の値をミドルウェアからハンドラーへ型安全に渡すには、`Context` を継承して `App<TContext>` を使います。文字列キーもキャストもありません。

@@ -362,6 +362,12 @@ The importer accepts OpenAPI 3.0 and 3.1 JSON. It supports object schemas, strin
 
 Composed schemas (`oneOf`, `anyOf`, and `allOf`), `additionalProperties`, external references, cookie parameters, non-JSON request bodies, and validation constraints without a `Miya.Schema` equivalent are skipped with MIYA020 through MIYA023 diagnostics. Path and query parameter names must also be valid C# identifiers because their generated schema mappings use the same names.
 
+`miya-gen import` runs the same import as a manual step for build setups that cannot use the source generator. It writes the generated `.g.cs` to disk instead of into the compilation:
+
+```sh
+miya-gen import --input api/openapi.json --output Generated --namespace MyApp.Api
+```
+
 ## Typed contexts
 
 By default a handler's context carries only request and response data. To pass your own values from middleware to a handler with full type safety, derive from `Context` and use `App<TContext>`. There are no string keys and no casts.
