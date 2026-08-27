@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Miya.Reflection</PackageId>
+    <Description>Opt-in reflection-based JSON codecs for Miya.</Description>
+    <!-- This package uses runtime reflection and is intentionally not marked IsAotCompatible. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Miya.Json\Miya.Json.csproj" />
+  </ItemGroup>
+
+</Project>
