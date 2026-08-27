@@ -2,8 +2,6 @@
 
 [English](benchmarks.md) | [日本語](benchmarks.ja.md)
 
-Miya の詳細な計測結果です。[README](../README.ja.md) は傾向をまとめ、この文書は数値と計測方法を載せます。
-
 計測は Apple M5 CPU（物理 10 コア）、macOS Tahoe 26.5.2、.NET SDK 10.0.203、.NET ランタイム 10.0.7 arm64 で行いました。BenchmarkDotNet 0.15.8 は concurrent workstation GC を使いました。ホストはそれ以外の隔離をしていないので、近い結果を比較するときは BenchmarkDotNet のレポートにある誤差と標準偏差の列も見てください。
 
 ## NativeAOT サンプル

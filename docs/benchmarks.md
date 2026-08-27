@@ -2,8 +2,6 @@
 
 [English](benchmarks.md) | [日本語](benchmarks.ja.md)
 
-Full measurements for Miya. The [README](../README.md) summarizes the trend; this document holds the numbers and how they were produced.
-
 The measurements ran on an Apple M5 CPU with 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC. The host was not otherwise isolated, so consider the error and standard-deviation columns in the BenchmarkDotNet reports when comparing close results.
 
 ## NativeAOT sample
