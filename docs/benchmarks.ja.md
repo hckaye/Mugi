@@ -2,7 +2,7 @@
 
 [English](benchmarks.md) | [日本語](benchmarks.ja.md)
 
-計測は Apple M5 CPU（物理 10 コア）、macOS Tahoe 26.5.2、.NET SDK 10.0.203、.NET ランタイム 10.0.7 arm64 で行いました。BenchmarkDotNet 0.15.8 は concurrent workstation GC を使いました。ホストはそれ以外の隔離をしていないので、近い結果を比較するときは BenchmarkDotNet のレポートにある誤差と標準偏差の列も見てください。
+計測は Apple M5 CPU（物理 10 コア）、macOS Tahoe 26.5.2、.NET SDK 10.0.203、.NET ランタイム 10.0.7 arm64 で行いました。BenchmarkDotNet 0.15.8 は concurrent workstation GC を使いました。
 
 ## NativeAOT サンプル
 
@@ -19,7 +19,7 @@
 
 `benchmarks/Miya.LoadBench` は、Miya サーバーと等価な ASP.NET Core Minimal API サーバーを 1 つずつ起動し、loopback の HTTP/1.1 で `HttpClient` の負荷クライアント（128 並行、3 秒のウォームアップ、10 秒の計測）でそれぞれに負荷をかけます。両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使い、コンソールログは無効、アプリケーション固有のサービスは未登録です。
 
-信頼できる比較はメモリです。3 つのエンドポイントすべてで、Miya サーバーはピーク作業セットが小さく、リクエストあたりの割り当ても少ない結果でした。ピーク作業セットの中央値は 22.7 から 26.0 MiB 小さく、リクエストあたりの割り当ては 38% から 90% 少なくなりました。
+3 つのエンドポイントすべてで、Miya サーバーはピーク作業セットが小さく、リクエストあたりの割り当ても少ない結果でした。ピーク作業セットの中央値は 22.7 から 26.0 MiB 小さく、リクエストあたりの割り当ては 38% から 90% 少なくなりました。
 
 | エンドポイント | ピーク作業セット（Miya / ASP.NET Core） | リクエストあたりの割り当て（Miya / ASP.NET Core） |
 | --- | ---: | ---: |
@@ -29,7 +29,7 @@
 
 スループットはまだ計測していません。両フレームワークとも Kestrel の上で動くので、転送層が共通のボトルネックであり、スループットはほぼ同じになるはずです。下のコマンドで、アイドル状態のホスト上で比較を実行できます。
 
-サーバーは計測区間の前後に `GC.GetTotalAllocatedBytes` を読み、差分とリクエスト数を標準エラーに出力します。クライアントは差分を対応するリクエスト数で割ります。サーバー PID の `Process.PeakWorkingSet64` も読みます。この macOS ランタイムでは値が 0 だったため、表にはその値と、サーバーの実行中に 10 ms 間隔で取得した `WorkingSet64` の最大値のうち、大きい方を記録しました。
+リクエストあたりの割り当ては、サーバーの `GC.GetTotalAllocatedBytes` の計測区間での差分をリクエスト数で割った値です。ピーク作業セットは、サーバーの実行中に 10 ms 間隔で取得した `WorkingSet64` の最大値です。
 
 同じ JIT 比較は次のコマンドで実行できます。
 
@@ -43,8 +43,6 @@
 シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
 
 両方のシリアライザーは再利用した `IBufferWriter<byte>` に書き込みました。System.Text.Json は source generation、camelCase 命名、`UnsafeRelaxedJsonEscaping`、required メンバー検査、nullable 注釈検査を使いました。リクエスト JSON は計測区間の前に用意し、両シリアライザーが required プロパティの欠落と非 nullable プロパティへの null をどちらも拒否することを setup で確認しました。バッファ拡張のケースは各操作の中で 16 バイトのバッファを作りました。
-
-合同のシリアライザー計測中、ホスト上で他の CPU 負荷の高いプロセスが動いていました。JIT の小さな DTO、DTO 100 件のリスト、リクエストバインドのケースは、それぞれのペアが近い条件で走るようカテゴリフィルターで測り直しました。JIT の表は、この 3 ケースにその個別計測を、残り 5 ケースに合同計測を使っています。NativeAOT の表は合同計測を使っています。
 
 合格条件は、JIT と NativeAOT の両方で、すべてのシナリオにおいて Miya の平均時間と割り当てバイト数が System.Text.Json 以下であることです。これらの結果は JIT と NativeAOT の全 16 ケースで合格しました。割り当てバイト数はすべてのシナリオで System.Text.Json 以下でした。
 

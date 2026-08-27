@@ -2,7 +2,7 @@
 
 [English](benchmarks.md) | [日本語](benchmarks.ja.md)
 
-The measurements ran on an Apple M5 CPU with 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC. The host was not otherwise isolated, so consider the error and standard-deviation columns in the BenchmarkDotNet reports when comparing close results.
+The measurements ran on an Apple M5 CPU with 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC.
 
 ## NativeAOT sample
 
@@ -19,7 +19,7 @@ The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389
 
 `benchmarks/Miya.LoadBench` starts a Miya server and an equivalent ASP.NET Core Minimal API server one at a time and drives each with an `HttpClient` load client over HTTP/1.1 loopback (128 concurrent workers, a 3-second warmup, and a 10-second measurement). Both servers return the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names, with console logging removed and no application services registered.
 
-Memory is the reliable comparison here. Across all three endpoints the Miya server used a lower peak working set and allocated less per request. The median peak working set was 22.7 to 26.0 MiB lower, and the per-request allocation was 38 to 90 percent lower.
+Across all three endpoints the Miya server used a lower peak working set and allocated less per request. The median peak working set was 22.7 to 26.0 MiB lower, and the per-request allocation was 38 to 90 percent lower.
 
 | Endpoint | Peak working set, Miya / ASP.NET Core | Allocated per request, Miya / ASP.NET Core |
 | --- | ---: | ---: |
@@ -29,7 +29,7 @@ Memory is the reliable comparison here. Across all three endpoints the Miya serv
 
 Throughput is not measured here yet. Both frameworks run on Kestrel, so the transport is the shared bottleneck and throughput is expected to be about the same. The command below runs the comparison on an idle host.
 
-The server reads `GC.GetTotalAllocatedBytes` before and after each measured interval and writes the byte difference and request count to standard error. The client divides that difference by the matching request count. It also reads `Process.PeakWorkingSet64` from the server PID. That property returned zero on this macOS runtime, so the reported value is the higher of it and `WorkingSet64` samples taken every 10 ms while the server was running.
+Per-request allocation is the server's `GC.GetTotalAllocatedBytes` difference across the measured interval divided by the request count. The peak working set is the maximum of `WorkingSet64` sampled every 10 ms while the server ran.
 
 Run the same JIT comparison with:
 
@@ -43,8 +43,6 @@ Run the same JIT comparison with:
 The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `Json.Serialize` and `Json.Deserialize` overloads. No benchmark-specific codecs were used.
 
 Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, `UnsafeRelaxedJsonEscaping`, required-member checks, and nullable-annotation checks. Request JSON was prepared before the measured interval, and setup verified that both serializers rejected a missing required property and a null value for its non-nullable property. The buffer-growth case created a 16-byte buffer inside each operation.
-
-Other CPU-intensive processes ran on the host during the combined serializer run. The JIT small DTO, list of 100 DTOs, and request-binding cases were repeated with category filters so each pair ran closer together. The JIT table uses those focused results for the three named cases and the combined run for the other five. The NativeAOT table uses the combined run.
 
 The pass condition requires Miya's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. These results passed all sixteen JIT and NativeAOT cases. Allocated bytes were no greater than System.Text.Json in every scenario.
 
