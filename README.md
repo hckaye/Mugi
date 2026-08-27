@@ -309,6 +309,24 @@ dotnet run --project src/Miya.Gen -- \
   --output samples/Hello/Generated
 ```
 
+## Zero-generation runtime (Miya.Reflection)
+
+Routing and text responses already work without generated source. When neither the source generator nor `miya-gen` is available, add the opt-in `Miya.Reflection` package to create JSON codecs from public properties and constructors at runtime.
+
+```xml
+<PackageReference Include="Miya.Reflection" Version="0.1.0" />
+```
+
+Enable the fallback once during startup:
+
+```csharp
+using Miya.Reflection;
+
+ReflectionCodecs.Enable();
+```
+
+The fallback is disabled by default. It supports the same primitive values, arrays, `List<T>`, `Dictionary<string, T>`, nullable values, enums, POCOs, and records with camel-case property names. `Miya.Reflection` does not support NativeAOT; use generated codecs when publishing with AOT.
+
 ## Typed contexts
 
 By default a handler's context carries only request and response data. To pass your own values from middleware to a handler with full type safety, derive from `Context` and use `App<TContext>`. There are no string keys and no casts.

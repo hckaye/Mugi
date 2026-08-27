@@ -5,6 +5,17 @@ namespace Miya.Json;
 /// <summary>Entry points for Json serialization and codec registration.</summary>
 public static class Json
 {
+    private static ICodecResolver? _fallback;
+
+    /// <summary>
+    /// Gets or sets the optional resolver used when no codec has been registered for a type.
+    /// </summary>
+    public static ICodecResolver? Fallback
+    {
+        get => Volatile.Read(ref _fallback);
+        set => Volatile.Write(ref _fallback, value);
+    }
+
     /// <summary>Registers the codec used for <typeparamref name="T"/>. Last registration wins.</summary>
     public static void Register<T>(IJsonCodec<T> codec)
     {
@@ -15,8 +26,17 @@ public static class Json
     /// <summary>Returns the registered codec for <typeparamref name="T"/>, or null.</summary>
     public static IJsonCodec<T>? TryGetCodec<T>() => Registry<T>.Instance;
 
-    /// <summary>Returns the registered codec for <typeparamref name="T"/>, or throws.</summary>
-    public static IJsonCodec<T> GetCodec<T>() => Registry<T>.Instance ?? throw MissingCodec<T>();
+    /// <summary>Returns the registered or fallback codec for <typeparamref name="T"/>, or throws.</summary>
+    public static IJsonCodec<T> GetCodec<T>()
+    {
+        var registered = Registry<T>.Instance;
+        if (registered is not null)
+        {
+            return registered;
+        }
+
+        return Fallback?.TryResolve<T>() ?? throw MissingCodec<T>();
+    }
 
     /// <summary>
     /// Returns the registered codec for <typeparamref name="T"/> when one is available;

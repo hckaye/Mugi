@@ -309,6 +309,24 @@ dotnet run --project src/Miya.Gen -- \
   --output samples/Hello/Generated
 ```
 
+## 事前生成なしの実行 (Miya.Reflection)
+
+ルーティングとテキストレスポンスは、生成済みソースがなくても動きます。ソースジェネレーターと `miya-gen` のどちらも使えない環境で JSON を扱う場合は、opt-in の `Miya.Reflection` パッケージを追加します。このパッケージは public プロパティとコンストラクターから実行時に codec を作ります。
+
+```xml
+<PackageReference Include="Miya.Reflection" Version="0.1.0" />
+```
+
+起動時にフォールバックを有効にします。
+
+```csharp
+using Miya.Reflection;
+
+ReflectionCodecs.Enable();
+```
+
+フォールバックは既定で無効です。生成 codec と同じプリミティブ、配列、`List<T>`、`Dictionary<string, T>`、nullable 値、enum、POCO、record を扱い、プロパティ名には camelCase を使います。`Miya.Reflection` は NativeAOT に対応しません。AOT で publish する場合は生成 codec を使います。
+
 ## 型付きコンテキスト
 
 既定では、ハンドラーのコンテキストはリクエストとレスポンスのデータだけを運びます。自分の値をミドルウェアからハンドラーへ型安全に渡すには、`Context` を継承して `App<TContext>` を使います。文字列キーもキャストもありません。
