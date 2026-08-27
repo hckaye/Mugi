@@ -33,6 +33,7 @@ public class SerializerBenchmarks
     [GlobalSetup]
     public void Setup()
     {
+        IncludeGeneratedCodecs();
         _miyaBuffer = new ArrayBufferWriter<byte>(16);
         _stjBuffer = new ArrayBufferWriter<byte>(16);
         _context = BenchmarkJsonContext.Default;
@@ -74,12 +75,13 @@ public class SerializerBenchmarks
         };
         _requestJson = JsonSerializer.SerializeToUtf8Bytes(request, _context.RequestDto);
 
-        ValidateEquivalent(_small, SmallDtoCodec.Instance, _context.SmallDto);
-        ValidateEquivalent(_items, ItemDtoListCodec.Instance, _context.ItemDtoList);
-        ValidateEquivalent(_nested, NestedDtoCodec.Instance, _context.NestedDto);
-        ValidateEquivalent(_escapeHeavy, StringCodec.Instance, _context.String);
-        ValidateEquivalent(_longString, StringCodec.Instance, _context.String);
-        ValidateEquivalent(_integers, IntegerPayloadCodec.Instance, _context.IntegerPayload);
+        ValidateEquivalent(_small, _context.SmallDto);
+        ValidateEquivalent(_items, _context.ItemDtoList);
+        ValidateEquivalent(_nested, _context.NestedDto);
+        ValidateEquivalent(_escapeHeavy, _context.String);
+        ValidateEquivalent(_longString, _context.String);
+        ValidateEquivalent(_integers, _context.IntegerPayload);
+        ValidateInputContracts();
 
         _ = SmallDtoMiya();
         _ = SmallDtoStj();
@@ -88,43 +90,43 @@ public class SerializerBenchmarks
     }
 
     [BenchmarkCategory("Small DTO"), Benchmark]
-    public int SmallDtoMiya() => SerializeMiya(_small, SmallDtoCodec.Instance);
+    public int SmallDtoMiya() => SerializeMiya(_small);
 
     [BenchmarkCategory("Small DTO"), Benchmark(Baseline = true)]
     public int SmallDtoStj() => SerializeStj(_small, _context.SmallDto);
 
     [BenchmarkCategory("List 100"), Benchmark]
-    public int List100Miya() => SerializeMiya(_items, ItemDtoListCodec.Instance);
+    public int List100Miya() => SerializeMiya(_items);
 
     [BenchmarkCategory("List 100"), Benchmark(Baseline = true)]
     public int List100Stj() => SerializeStj(_items, _context.ItemDtoList);
 
     [BenchmarkCategory("Nested"), Benchmark]
-    public int NestedMiya() => SerializeMiya(_nested, NestedDtoCodec.Instance);
+    public int NestedMiya() => SerializeMiya(_nested);
 
     [BenchmarkCategory("Nested"), Benchmark(Baseline = true)]
     public int NestedStj() => SerializeStj(_nested, _context.NestedDto);
 
     [BenchmarkCategory("Escape-heavy string"), Benchmark]
-    public int EscapeHeavyMiya() => SerializeMiya(_escapeHeavy, StringCodec.Instance);
+    public int EscapeHeavyMiya() => SerializeMiya(_escapeHeavy);
 
     [BenchmarkCategory("Escape-heavy string"), Benchmark(Baseline = true)]
     public int EscapeHeavyStj() => SerializeStj(_escapeHeavy, _context.String);
 
     [BenchmarkCategory("Long string"), Benchmark]
-    public int LongStringMiya() => SerializeMiya(_longString, StringCodec.Instance);
+    public int LongStringMiya() => SerializeMiya(_longString);
 
     [BenchmarkCategory("Long string"), Benchmark(Baseline = true)]
     public int LongStringStj() => SerializeStj(_longString, _context.String);
 
     [BenchmarkCategory("Integer-centric"), Benchmark]
-    public int IntegersMiya() => SerializeMiya(_integers, IntegerPayloadCodec.Instance);
+    public int IntegersMiya() => SerializeMiya(_integers);
 
     [BenchmarkCategory("Integer-centric"), Benchmark(Baseline = true)]
     public int IntegersStj() => SerializeStj(_integers, _context.IntegerPayload);
 
     [BenchmarkCategory("Request bind"), Benchmark]
-    public RequestDto RequestBindMiya() => MiyaJson.Deserialize(_requestJson, RequestDtoCodec.Instance)!;
+    public RequestDto RequestBindMiya() => MiyaJson.Deserialize<RequestDto>(_requestJson)!;
 
     [BenchmarkCategory("Request bind"), Benchmark(Baseline = true)]
     public RequestDto RequestBindStj() => JsonSerializer.Deserialize(_requestJson, _context.RequestDto)!;
@@ -133,7 +135,7 @@ public class SerializerBenchmarks
     public int BufferGrowthMiya()
     {
         var buffer = new ArrayBufferWriter<byte>(16);
-        MiyaJson.Serialize(buffer, _longString, StringCodec.Instance);
+        MiyaJson.Serialize(buffer, _longString);
         return buffer.WrittenCount;
     }
 
@@ -147,10 +149,10 @@ public class SerializerBenchmarks
         return buffer.WrittenCount;
     }
 
-    private int SerializeMiya<T>(T value, IMiyaJsonCodec<T> codec)
+    private int SerializeMiya<T>(T value)
     {
         _miyaBuffer.Clear();
-        MiyaJson.Serialize(_miyaBuffer, value, codec);
+        MiyaJson.Serialize(_miyaBuffer, value);
         return _miyaBuffer.WrittenCount;
     }
 
@@ -163,11 +165,11 @@ public class SerializerBenchmarks
         return _stjBuffer.WrittenCount;
     }
 
-    private static void ValidateEquivalent<T>(T value, IMiyaJsonCodec<T> codec, JsonTypeInfo<T> typeInfo)
+    private static void ValidateEquivalent<T>(T value, JsonTypeInfo<T> typeInfo)
     {
         var miya = new ArrayBufferWriter<byte>();
         var stj = new ArrayBufferWriter<byte>();
-        MiyaJson.Serialize(miya, value, codec);
+        MiyaJson.Serialize(miya, value);
         using (var writer = new Utf8JsonWriter(stj, new JsonWriterOptions
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -182,6 +184,57 @@ public class SerializerBenchmarks
         {
             throw new InvalidOperationException("The serializers produced different JSON values.");
         }
+    }
+
+    private static void IncludeGeneratedCodecs()
+    {
+        MiyaJson.Include<SmallDto>();
+        // STJ does not enforce nullable annotations for collection elements, so match that contract.
+        MiyaJson.Include<List<ItemDto?>>();
+        MiyaJson.Include<NestedDto>();
+        MiyaJson.Include<string>();
+        MiyaJson.Include<IntegerPayload>();
+        MiyaJson.Include<RequestDto>();
+    }
+
+    private void ValidateInputContracts()
+    {
+        ValidateMiyaRejects(
+            """{"id":12345,"page":7,"includeDetails":true,"filters":[3,5]}"""u8);
+        ValidateStjRejects(
+            """{"id":12345,"page":7,"includeDetails":true,"filters":[3,5]}"""u8);
+        ValidateMiyaRejects(
+            """{"id":12345,"query":null,"page":7,"includeDetails":true,"filters":[3,5]}"""u8);
+        ValidateStjRejects(
+            """{"id":12345,"query":null,"page":7,"includeDetails":true,"filters":[3,5]}"""u8);
+    }
+
+    private static void ValidateMiyaRejects(ReadOnlySpan<byte> json)
+    {
+        try
+        {
+            _ = MiyaJson.Deserialize<RequestDto>(json);
+        }
+        catch (MiyaJsonException exception) when (exception.IsInputError)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("Miya accepted input that violates the benchmark contract.");
+    }
+
+    private void ValidateStjRejects(ReadOnlySpan<byte> json)
+    {
+        try
+        {
+            _ = JsonSerializer.Deserialize(json, _context.RequestDto);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("STJ accepted input that violates the benchmark contract.");
     }
 }
 
@@ -224,7 +277,9 @@ public sealed class RequestDto
 
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Default,
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    RespectNullableAnnotations = true,
+    RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(SmallDto), TypeInfoPropertyName = "SmallDto")]
 [JsonSerializable(typeof(List<ItemDto>), TypeInfoPropertyName = "ItemDtoList")]
 [JsonSerializable(typeof(NestedDto), TypeInfoPropertyName = "NestedDto")]
@@ -232,180 +287,3 @@ public sealed class RequestDto
 [JsonSerializable(typeof(IntegerPayload), TypeInfoPropertyName = "IntegerPayload")]
 [JsonSerializable(typeof(RequestDto), TypeInfoPropertyName = "RequestDto")]
 public sealed partial class BenchmarkJsonContext : JsonSerializerContext;
-
-internal sealed class StringCodec : IMiyaJsonCodec<string>
-{
-    public static StringCodec Instance { get; } = new();
-    public void Write(ref MiyaJsonWriter writer, string? value) => writer.WriteString(value);
-    public string? Read(ref MiyaJsonReader reader) => reader.ReadString();
-}
-
-internal sealed class SmallDtoCodec : IMiyaJsonCodec<SmallDto>
-{
-    public static SmallDtoCodec Instance { get; } = new();
-
-    public void Write(ref MiyaJsonWriter writer, SmallDto? value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        writer.WriteRaw("{\"id\":"u8);
-        writer.WriteNumber(value.Id);
-        writer.WriteRaw(",\"name\":"u8);
-        writer.WriteString(value.Name);
-        writer.WriteRaw(",\"active\":"u8);
-        writer.WriteBool(value.Active);
-        writer.WriteRaw("}"u8);
-    }
-
-    public SmallDto? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
-}
-
-internal sealed class ItemDtoListCodec : IMiyaJsonCodec<List<ItemDto>>
-{
-    public static ItemDtoListCodec Instance { get; } = new();
-
-    public void Write(ref MiyaJsonWriter writer, List<ItemDto>? value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        writer.WriteRaw("["u8);
-        for (var index = 0; index < value.Count; index++)
-        {
-            if (index != 0)
-            {
-                writer.WriteRaw(","u8);
-            }
-
-            var item = value[index];
-            writer.WriteRaw("{\"id\":"u8);
-            writer.WriteNumber(item.Id);
-            writer.WriteRaw(",\"name\":"u8);
-            writer.WriteString(item.Name);
-            writer.WriteRaw(",\"enabled\":"u8);
-            writer.WriteBool(item.Enabled);
-            writer.WriteRaw("}"u8);
-        }
-
-        writer.WriteRaw("]"u8);
-    }
-
-    public List<ItemDto>? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
-}
-
-internal sealed class NestedDtoCodec : IMiyaJsonCodec<NestedDto>
-{
-    public static NestedDtoCodec Instance { get; } = new();
-
-    public void Write(ref MiyaJsonWriter writer, NestedDto? value)
-    {
-        if (value is null)
-        {
-            writer.WriteNull();
-            return;
-        }
-
-        writer.WriteRaw("{\"name\":"u8);
-        writer.WriteString(value.Name);
-        writer.WriteRaw(",\"values\":["u8);
-        WriteInt32Values(ref writer, value.Values);
-        writer.WriteRaw("],\"child\":"u8);
-        Write(ref writer, value.Child);
-        writer.WriteRaw("}"u8);
-    }
-
-    public NestedDto? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
-
-    private static void WriteInt32Values(ref MiyaJsonWriter writer, int[] values)
-    {
-        for (var index = 0; index < values.Length; index++)
-        {
-            if (index != 0)
-            {
-                writer.WriteRaw(","u8);
-            }
-
-            writer.WriteNumber(values[index]);
-        }
-    }
-}
-
-internal sealed class IntegerPayloadCodec : IMiyaJsonCodec<IntegerPayload>
-{
-    public static IntegerPayloadCodec Instance { get; } = new();
-
-    public void Write(ref MiyaJsonWriter writer, IntegerPayload? value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        writer.WriteRaw("{\"minimum\":"u8);
-        writer.WriteNumber(value.Minimum);
-        writer.WriteRaw(",\"maximum\":"u8);
-        writer.WriteNumber(value.Maximum);
-        writer.WriteRaw(",\"values\":["u8);
-        for (var index = 0; index < value.Values.Length; index++)
-        {
-            if (index != 0)
-            {
-                writer.WriteRaw(","u8);
-            }
-
-            writer.WriteNumber(value.Values[index]);
-        }
-
-        writer.WriteRaw("]}"u8);
-    }
-
-    public IntegerPayload? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
-}
-
-internal sealed class RequestDtoCodec : IMiyaJsonCodec<RequestDto>
-{
-    public static RequestDtoCodec Instance { get; } = new();
-
-    public void Write(ref MiyaJsonWriter writer, RequestDto? value) => throw new NotSupportedException();
-
-    public RequestDto? Read(ref MiyaJsonReader reader)
-    {
-        var result = new RequestDto { Query = string.Empty };
-        reader.ReadBeginObject();
-        while (!reader.TryReadEndObject())
-        {
-            var name = reader.ReadPropertyName();
-            if (name.SequenceEqual("id"u8))
-            {
-                result.Id = reader.ReadInt32();
-            }
-            else if (name.SequenceEqual("query"u8))
-            {
-                result.Query = reader.ReadString()!;
-            }
-            else if (name.SequenceEqual("page"u8))
-            {
-                result.Page = reader.ReadInt32();
-            }
-            else if (name.SequenceEqual("includeDetails"u8))
-            {
-                result.IncludeDetails = reader.ReadBool();
-            }
-            else if (name.SequenceEqual("filters"u8))
-            {
-                result.Filters = ReadFilters(ref reader);
-            }
-            else
-            {
-                reader.SkipValue();
-            }
-        }
-
-        return result;
-    }
-
-    private static List<int> ReadFilters(ref MiyaJsonReader reader)
-    {
-        var result = new List<int>();
-        reader.ReadBeginArray();
-        while (!reader.TryReadEndArray())
-        {
-            result.Add(reader.ReadInt32());
-        }
-
-        return result;
-    }
-}
