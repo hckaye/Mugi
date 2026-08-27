@@ -1,11 +1,11 @@
 namespace Miya.Tests;
 
-public sealed class OptionsTests
+public sealed class AppOptionsTests
 {
     [Fact]
     public void CleartextDefaultsToHttp1()
     {
-        var options = new Options();
+        var options = new AppOptions();
 
         Assert.Equal(Protocols.Http1, options.Protocols);
         options.Validate();
@@ -14,7 +14,7 @@ public sealed class OptionsTests
     [Fact]
     public void CleartextHttp2IsValid()
     {
-        var options = new Options
+        var options = new AppOptions
         {
             Protocols = Protocols.Http2,
         };
@@ -25,7 +25,7 @@ public sealed class OptionsTests
     [Fact]
     public void CleartextHttp1AndHttp2IsRejected()
     {
-        var options = new Options
+        var options = new AppOptions
         {
             Protocols = Protocols.Http1AndHttp2,
         };
@@ -37,7 +37,7 @@ public sealed class OptionsTests
     [Fact]
     public void Http3WithoutCertificateIsRejected()
     {
-        var options = new Options
+        var options = new AppOptions
         {
             Protocols = Protocols.Http1AndHttp2AndHttp3,
         };
@@ -51,7 +51,7 @@ public sealed class OptionsTests
     [InlineData((Protocols)8)]
     public void UndefinedProtocolValuesAreRejected(Protocols protocols)
     {
-        var options = new Options
+        var options = new AppOptions
         {
             Protocols = protocols,
         };

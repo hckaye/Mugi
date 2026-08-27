@@ -13,7 +13,7 @@ namespace Miya;
 
 public class Context
 {
-    private static readonly Options DefaultOptions = new();
+    private static readonly AppOptions DefaultOptions = new();
     private static readonly AsyncLocal<RequestLease?> CurrentLease = new();
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -26,7 +26,7 @@ public class Context
     private IHttpResponseFeature? _responseFeature;
     private IHttpResponseBodyFeature? _responseBodyFeature;
     private IHttpRequestLifetimeFeature? _lifetimeFeature;
-    private Options _options = DefaultOptions;
+    private AppOptions _options = DefaultOptions;
     private ResponseState _responseState;
     private int _statusCode = StatusCodes.Status200OK;
     private string[]? _parameterNames;
@@ -81,7 +81,7 @@ public class Context
         }
     }
 
-    internal Options Options
+    internal AppOptions Options
     {
         get
         {
@@ -334,7 +334,7 @@ public class Context
         return Text("Not Found");
     }
 
-    internal void Initialize(IFeatureCollection features, Options? options = null)
+    internal void Initialize(IFeatureCollection features, AppOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(features);
         if (_features is not null)

@@ -16,7 +16,7 @@ public enum Protocols
     Http1AndHttp2AndHttp3 = Http1 | Http2 | Http3,
 }
 
-public sealed class Options
+public sealed class AppOptions
 {
     private Protocols? _protocols;
 

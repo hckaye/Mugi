@@ -25,7 +25,7 @@ public partial class App<TContext>
     /// </summary>
     public void Run(int? port = null)
     {
-        var options = new Options
+        var options = new AppOptions
         {
             LoggerFactory = StderrLoggerFactory.Instance,
         };
@@ -36,12 +36,12 @@ public partial class App<TContext>
     /// <summary>
     /// Runs the configured HTTP server until cancellation or a termination signal requests shutdown.
     /// </summary>
-    public Task RunAsync(Options? options = null, CancellationToken ct = default) =>
+    public Task RunAsync(AppOptions? options = null, CancellationToken ct = default) =>
         RunAsyncCore(explicitPort: null, options, ct);
 
     private async Task RunAsyncCore(
         int? explicitPort,
-        Options? options,
+        AppOptions? options,
         CancellationToken ct)
     {
         var server = await StartAsyncCore(explicitPort, options, ct).ConfigureAwait(false);
@@ -59,16 +59,16 @@ public partial class App<TContext>
     /// Starts the configured HTTP server.
     /// </summary>
     public Task<Server> StartAsync(
-        Options? options = null,
+        AppOptions? options = null,
         CancellationToken ct = default) =>
         StartAsyncCore(explicitPort: null, options, ct);
 
     private async Task<Server> StartAsyncCore(
         int? explicitPort,
-        Options? options,
+        AppOptions? options,
         CancellationToken ct)
     {
-        var effectiveOptions = options ?? new Options();
+        var effectiveOptions = options ?? new AppOptions();
         effectiveOptions.Validate();
         var port = ResolvePort(
             explicitPort,
@@ -96,7 +96,7 @@ public partial class App<TContext>
     }
 
     private async Task<Server> StartDirectAsync(
-        Options options,
+        AppOptions options,
         int port,
         Protocols protocols,
         ILoggerFactory loggerFactory,
@@ -137,7 +137,7 @@ public partial class App<TContext>
     }
 
     private async Task<Server> StartServiceBackedAsync(
-        Options options,
+        AppOptions options,
         int port,
         Protocols protocols,
         ILoggerFactory loggerFactory,
@@ -191,7 +191,7 @@ public partial class App<TContext>
 
     private static void ConfigureListenOptions(
         ListenOptions listenOptions,
-        Options options,
+        AppOptions options,
         Protocols protocols,
         ILoggerFactory loggerFactory)
     {
@@ -462,12 +462,12 @@ internal sealed class KestrelApplication<TContext> : IHttpApplication<TContext>
     where TContext : Context, new()
 {
     private readonly App<TContext> _app;
-    private readonly Options _options;
+    private readonly AppOptions _options;
     private readonly Handler<TContext> _handler;
 
     public KestrelApplication(
         App<TContext> app,
-        Options options,
+        AppOptions options,
         Handler<TContext> handler)
     {
         _app = app;

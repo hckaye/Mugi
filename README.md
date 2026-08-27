@@ -229,19 +229,19 @@ internal sealed class UserCodec : IJsonCodec<User>
 
 ### Limits for untrusted input
 
-Json enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `Options` and `JsonOptions`.
+Json enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `AppOptions` and `JsonOptions`.
 
 | Setting | Default |
 | --- | ---: |
-| JSON request body, `Options.MaxJsonBodyBytes` | 1 MiB |
+| JSON request body, `AppOptions.MaxJsonBodyBytes` | 1 MiB |
 | Complete JSON document, `MaxDocumentByteLength` | 1 MiB |
 | Object and array depth, `MaxDepth` | 64 |
 | One string token, `MaxStringByteLength` | 1 MiB |
 | Members in one object or elements in one array, `MaxCollectionSize` | 1,048,576 |
 | Digits in one number, `MaxNumberDigits` | 128 |
 | Retained Json temporary buffer, `MaxPooledBufferByteLength` | 64 KiB |
-| Buffered response, `Options.MaxBufferedResponseBytes` | 1 MiB |
-| Request body, `Options.MaxRequestBodyBytes` | 30 MiB |
+| Buffered response, `AppOptions.MaxBufferedResponseBytes` | 1 MiB |
+| Request body, `AppOptions.MaxRequestBodyBytes` | 30 MiB |
 
 NaN and Infinity are rejected by default. `JsonOptions` also carries a cancellation token for long serialization and parsing.
 
@@ -297,7 +297,7 @@ A derived context is created fresh for each request. If you want it pooled and r
 
 `Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified so the `PORT` environment variable applies; `Run(8080)` chooses the port explicitly. `RunAsync(options, ct)` and `StartAsync(options, ct)` host asynchronously; `StartAsync` returns a `Server` with the bound addresses and a `StopAsync` method. Port 0 asks the operating system for a free port.
 
-Port selection uses the explicit `Run(port)` value first, then `Options.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
+Port selection uses the explicit `Run(port)` value first, then `AppOptions.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
 
 SIGINT, SIGTERM, and cancellation stop accepting new requests and wait for the ones in flight, with a 30 second shutdown timeout by default. A second signal ends the process immediately.
 
@@ -306,7 +306,7 @@ SIGINT, SIGTERM, and cancellation stop accepting new requests and wait for the o
 Without a certificate the default is HTTP/1.1. Select `Protocols.Http2` for cleartext HTTP/2:
 
 ```csharp
-await app.RunAsync(new Options
+await app.RunAsync(new AppOptions
 {
     Protocols = Protocols.Http2,
 });
@@ -321,7 +321,7 @@ using System.Security.Cryptography.X509Certificates;
 
 using var certificate = X509CertificateLoader.LoadPkcs12FromFile("server.pfx", "certificate-password");
 
-await app.RunAsync(new Options
+await app.RunAsync(new AppOptions
 {
     Certificate = certificate,
 });
@@ -330,7 +330,7 @@ await app.RunAsync(new Options
 HTTP/3 is opt-in and needs a certificate. Add the `Http3` flag while keeping HTTP/1.1 and HTTP/2 so clients can discover HTTP/3 from Kestrel's `Alt-Svc` response header:
 
 ```csharp
-await app.RunAsync(new Options
+await app.RunAsync(new AppOptions
 {
     Certificate = certificate,
     Protocols = Protocols.Http1AndHttp2AndHttp3,
@@ -341,9 +341,9 @@ Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `Qui
 
 ### Advanced Kestrel settings
 
-`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `Options.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
+`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `AppOptions.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
 
-`Options.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
+`AppOptions.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
 
 ## Measured results
 

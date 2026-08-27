@@ -59,7 +59,7 @@ public sealed class RequestTests
             method: "POST",
             body: Encoding.UTF8.GetBytes("12345"),
             headers: new Dictionary<string, string> { ["Content-Length"] = "5" },
-            options: new Options { MaxRequestBodyBytes = 4 });
+            options: new AppOptions { MaxRequestBodyBytes = 4 });
 
         Assert.Equal(StatusCodes.Status413PayloadTooLarge, response.Response.StatusCode);
         Assert.Equal("Payload Too Large", response.BodyText);
@@ -79,7 +79,7 @@ public sealed class RequestTests
             app,
             method: "POST",
             body: Encoding.UTF8.GetBytes("12345"),
-            options: new Options { MaxRequestBodyBytes = 4 });
+            options: new AppOptions { MaxRequestBodyBytes = 4 });
 
         Assert.Equal(StatusCodes.Status413PayloadTooLarge, response.Response.StatusCode);
     }

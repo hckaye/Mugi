@@ -8,7 +8,7 @@ namespace Miya.Benchmarks;
 
 internal sealed class InMemoryRequestHarness : IDisposable
 {
-    private static readonly Options Options = new();
+    private static readonly AppOptions Options = new();
 
     private readonly Handler<Context> _handler;
     private readonly Context _context = new();
@@ -52,7 +52,7 @@ internal static class ContextAccess
     internal static extern void Initialize(
         Context context,
         IFeatureCollection features,
-        Options? options);
+        AppOptions? options);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ResetFrameworkState")]
     internal static extern void ResetFrameworkState(Context context, bool retainBuffers);

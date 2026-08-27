@@ -128,7 +128,7 @@ public partial class App<TContext>
         return _built;
     }
 
-    internal TContext CreateContext(IFeatureCollection features, Options? options = null)
+    internal TContext CreateContext(IFeatureCollection features, AppOptions? options = null)
     {
         var context = _contextPool.Rent();
         try
@@ -145,7 +145,7 @@ public partial class App<TContext>
 
     internal void ReleaseContext(TContext context) => _contextPool.Return(context);
 
-    internal async ValueTask ExecuteAsync(IFeatureCollection features, Options? options = null)
+    internal async ValueTask ExecuteAsync(IFeatureCollection features, AppOptions? options = null)
     {
         var context = CreateContext(features, options);
         try

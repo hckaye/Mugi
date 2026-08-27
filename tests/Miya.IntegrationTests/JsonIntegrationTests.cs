@@ -72,7 +72,7 @@ public sealed class JsonIntegrationTests
             return operation;
         });
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             MaxBufferedResponseBytes = 10,
@@ -120,7 +120,7 @@ public sealed class JsonIntegrationTests
     private static ValueTask WriteGenericJson<T>(Context context, T value) => context.Json(value);
 
     private static Task<Server> StartAsync(App app) => app.StartAsync(
-        new Options
+        new AppOptions
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),

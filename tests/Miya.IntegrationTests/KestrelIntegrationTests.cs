@@ -44,7 +44,7 @@ public sealed class KestrelIntegrationTests
         app.Get("/", context => context.Text("Hello"));
 
         var configured = false;
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
@@ -220,7 +220,7 @@ public sealed class KestrelIntegrationTests
             await context.Text("unreachable");
         });
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             MaxRequestBodyBytes = 4,
@@ -254,7 +254,7 @@ public sealed class KestrelIntegrationTests
             return context.Text(body);
         });
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             MaxBufferedResponseBytes = 32,
@@ -463,7 +463,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             Protocols = Protocols.Http2,
@@ -485,7 +485,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             Certificate = certificate,
@@ -514,7 +514,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             Certificate = certificate,
@@ -539,7 +539,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             Certificate = certificate,
@@ -610,7 +610,7 @@ public sealed class KestrelIntegrationTests
             await context.Text("done");
         });
 
-        await using var server = await app.StartAsync(new Options
+        await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
             Protocols = Protocols.Http2,
@@ -655,7 +655,7 @@ public sealed class KestrelIntegrationTests
 
         await Assert.ThrowsAnyAsync<IOException>(async () =>
         {
-            await app.StartAsync(new Options { Port = port });
+            await app.StartAsync(new AppOptions { Port = port });
         });
     }
 
@@ -684,7 +684,7 @@ public sealed class KestrelIntegrationTests
             Environment.SetEnvironmentVariable("PORT", "0");
             var app = new App();
             app.Get("/", context => context.Text("Hello"));
-            server = await app.StartAsync(new Options
+            server = await app.StartAsync(new AppOptions
             {
                 ShutdownTimeout = TimeSpan.FromSeconds(2),
             });
@@ -726,7 +726,7 @@ public sealed class KestrelIntegrationTests
     }
 
     private static Task<Server> StartAsync(App app) => app.StartAsync(
-        new Options
+        new AppOptions
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
