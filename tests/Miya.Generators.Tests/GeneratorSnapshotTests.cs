@@ -44,6 +44,9 @@ public sealed class GeneratorSnapshotTests
         Assert.DoesNotContain(run.Compilation.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         var codecs = run.SourcesWithPrefix("Miya.JsonCodec.");
         Assert.Contains("writer.EnterContainer", codecs, StringComparison.Ordinal);
+        Assert.Contains("if ((++index & 4095) == 0)", codecs, StringComparison.Ordinal);
+        Assert.Contains("writer.ThrowIfCancellationRequested();", codecs, StringComparison.Ordinal);
+        Assert.DoesNotContain("WriteValue(ref writer, value, 0)", codecs, StringComparison.Ordinal);
         Assert.DoesNotContain("private const int MaxDepth = 64;", codecs, StringComparison.Ordinal);
         Assert.Contains("MemoryExtensions.SequenceEqual(propertyName, \"name\"u8)", codecs, StringComparison.Ordinal);
         Assert.Contains("reader.SkipValue();", codecs, StringComparison.Ordinal);

@@ -10,6 +10,9 @@ namespace Miya.Json;
 /// <summary>Writes UTF-8 JSON directly into an <see cref="IBufferWriter{Byte}"/>.</summary>
 public ref struct MiyaJsonWriter
 {
+    private const int CancellationCheckByteInterval = 64 * 1024;
+    private const int CancellationCheckDepthInterval = 64;
+
     private static readonly SearchValues<char> CharactersToEscape = SearchValues.Create(
         "\"\\\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000A\u000B\u000C\u000D\u000E\u000F" +
         "\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F");
@@ -18,21 +21,37 @@ public ref struct MiyaJsonWriter
 
     private readonly IBufferWriter<byte> _destination;
     private readonly MiyaJsonOptions _options;
+    private readonly CancellationToken _cancellationToken;
+    private readonly int _maxDepth;
+    private readonly int _maxCollectionSize;
+    private readonly int _maxDocumentByteLength;
+    private readonly int _maxStringByteLength;
     private Span<byte> _buffer;
     private int _pendingBytes;
     private int _remainingDocumentBytes;
+    private int _bytesUntilCancellationCheck;
     private int _depth;
 
     public MiyaJsonWriter(IBufferWriter<byte> destination, MiyaJsonOptions options)
     {
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(options);
-        ValidateOptions(options);
+        if (!ReferenceEquals(options, MiyaJsonOptions.Default))
+        {
+            ValidateOptions(options);
+        }
+
         _destination = destination;
         _options = options;
+        _cancellationToken = options.CancellationToken;
+        _maxDepth = options.MaxDepth;
+        _maxCollectionSize = options.MaxCollectionSize;
+        _maxDocumentByteLength = options.MaxDocumentByteLength;
+        _maxStringByteLength = options.MaxStringByteLength;
         _buffer = destination.GetSpan();
         _pendingBytes = 0;
-        _remainingDocumentBytes = options.MaxDocumentByteLength;
+        _remainingDocumentBytes = _maxDocumentByteLength;
+        _bytesUntilCancellationCheck = CancellationCheckByteInterval;
         _depth = 0;
     }
 
@@ -40,6 +59,7 @@ public ref struct MiyaJsonWriter
     /// Enters an object or array and validates its nesting depth and element count.
     /// Generated codecs call this before writing every container.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnterContainer(int elementCount)
     {
         if (elementCount < 0)
@@ -47,23 +67,28 @@ public ref struct MiyaJsonWriter
             throw new ArgumentOutOfRangeException(nameof(elementCount));
         }
 
-        _options.CancellationToken.ThrowIfCancellationRequested();
-        if (_depth >= _options.MaxDepth)
+        if (_depth >= _maxDepth)
         {
             throw new MiyaJsonException(
-                $"The JSON nesting depth exceeds the {_options.MaxDepth}-level limit.");
+                $"The JSON nesting depth exceeds the {_maxDepth}-level limit.");
         }
 
-        if (elementCount > _options.MaxCollectionSize)
+        if (elementCount > _maxCollectionSize)
         {
             throw new MiyaJsonException(
-                $"The container exceeds the {_options.MaxCollectionSize}-element limit.");
+                $"The container exceeds the {_maxCollectionSize}-element limit.");
+        }
+
+        if ((_depth & (CancellationCheckDepthInterval - 1)) == CancellationCheckDepthInterval - 1)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
         }
 
         _depth++;
     }
 
     /// <summary>Leaves an object or array previously entered with <see cref="EnterContainer"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ExitContainer()
     {
         if (_depth == 0)
@@ -73,6 +98,10 @@ public ref struct MiyaJsonWriter
 
         _depth--;
     }
+
+    /// <summary>Checks the configured cancellation token during long generated collection loops.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ThrowIfCancellationRequested() => _cancellationToken.ThrowIfCancellationRequested();
 
     /// <summary>Writes trusted, pre-encoded JSON fragments such as property names and structural tokens.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -164,7 +193,7 @@ public ref struct MiyaJsonWriter
         {
             if (charactersUntilCancellationCheck <= 0)
             {
-                _options.CancellationToken.ThrowIfCancellationRequested();
+                _cancellationToken.ThrowIfCancellationRequested();
                 charactersUntilCancellationCheck = 16 * 1024;
             }
 
@@ -187,10 +216,10 @@ public ref struct MiyaJsonWriter
 
             var destination = GetWriteSpan(maximumEncodedLength);
             var written = EncodeStringChunk(chunk, destination);
-            if (written > _options.MaxStringByteLength - totalEncodedLength)
+            if (written > _maxStringByteLength - totalEncodedLength)
             {
                 throw new MiyaJsonException(
-                    $"The encoded string exceeds the {_options.MaxStringByteLength}-byte limit.");
+                    $"The encoded string exceeds the {_maxStringByteLength}-byte limit.");
             }
 
             totalEncodedLength += written;
@@ -588,10 +617,10 @@ public ref struct MiyaJsonWriter
 
     private void EnsureStringCapacity(int encodedByteLength)
     {
-        if (encodedByteLength > _options.MaxStringByteLength)
+        if (encodedByteLength > _maxStringByteLength)
         {
             throw new MiyaJsonException(
-                $"The encoded string exceeds the {_options.MaxStringByteLength}-byte limit.");
+                $"The encoded string exceeds the {_maxStringByteLength}-byte limit.");
         }
     }
 
@@ -601,7 +630,7 @@ public ref struct MiyaJsonWriter
         if (additionalBytes > _remainingDocumentBytes)
         {
             throw new MiyaJsonException(
-                $"The JSON document exceeds the {_options.MaxDocumentByteLength}-byte limit.");
+                $"The JSON document exceeds the {_maxDocumentByteLength}-byte limit.");
         }
 
         _remainingDocumentBytes -= additionalBytes;
@@ -625,6 +654,19 @@ public ref struct MiyaJsonWriter
         if (_pendingBytes == 0)
         {
             return;
+        }
+
+        if (_pendingBytes >= _bytesUntilCancellationCheck)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var remainder = _pendingBytes % CancellationCheckByteInterval;
+            _bytesUntilCancellationCheck = remainder == 0
+                ? CancellationCheckByteInterval
+                : CancellationCheckByteInterval - remainder;
+        }
+        else
+        {
+            _bytesUntilCancellationCheck -= _pendingBytes;
         }
 
         _destination.Advance(_pendingBytes);

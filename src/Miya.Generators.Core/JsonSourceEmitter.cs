@@ -92,14 +92,14 @@ internal sealed class JsonSourceEmitter
         writer.Line();
         writer.Line(
             "public void Write(ref global::Miya.Json.MiyaJsonWriter writer, " + valueTypeName +
-            " value) => WriteValue(ref writer, value, 0);");
+            " value) => WriteValue(ref writer, value);");
         writer.Line(
             "public " + valueTypeName +
             " Read(ref global::Miya.Json.MiyaJsonReader reader) => ReadValue(ref reader, 0);");
         writer.Line();
         writer.Open(
             "internal static void WriteValue(ref global::Miya.Json.MiyaJsonWriter writer, " +
-            valueTypeName + " value, int depth)");
+            valueTypeName + " value)");
         EmitWriteBody(writer, model);
         writer.Close();
         writer.Line();
@@ -150,14 +150,14 @@ internal sealed class JsonSourceEmitter
                 writer.Line("writer.WriteDateTimeOffset(value);");
                 return;
             case JsonTypeKind.Enum:
-                writer.Line(WriteCall(model.EnumUnderlyingType!, "(" + TypeNames.Display(model.EnumUnderlyingType!) + ")value", "depth"));
+                writer.Line(WriteCall(model.EnumUnderlyingType!, "(" + TypeNames.Display(model.EnumUnderlyingType!) + ")value"));
                 return;
             case JsonTypeKind.Nullable:
                 writer.Open("if (!value.HasValue)");
                 writer.Line("writer.WriteNull();");
                 writer.Line("return;");
                 writer.Close();
-                writer.Line(WriteCall(model.ElementType!, "value.Value", "depth"));
+                writer.Line(WriteCall(model.ElementType!, "value.Value"));
                 return;
             case JsonTypeKind.Array:
             case JsonTypeKind.List:
@@ -182,10 +182,13 @@ internal sealed class JsonSourceEmitter
         writer.Line("writer.WriteRaw(\"[\"u8);");
         writer.Line("var index = 0;");
         writer.Open("foreach (var item in value)");
-        writer.Open("if (index++ != 0)");
+        writer.Open("if (index != 0)");
         writer.Line("writer.WriteRaw(\",\"u8);");
         writer.Close();
-        writer.Line(WriteCall(model.ElementType!, "item", "depth + 1"));
+        writer.Line(WriteCall(model.ElementType!, "item"));
+        writer.Open("if ((++index & 4095) == 0)");
+        writer.Line("writer.ThrowIfCancellationRequested();");
+        writer.Close();
         writer.Close();
         writer.Line("writer.WriteRaw(\"]\"u8);");
         writer.Line("writer.ExitContainer();");
@@ -198,12 +201,15 @@ internal sealed class JsonSourceEmitter
         writer.Line("writer.WriteRaw(\"{\"u8);");
         writer.Line("var index = 0;");
         writer.Open("foreach (var pair in value)");
-        writer.Open("if (index++ != 0)");
+        writer.Open("if (index != 0)");
         writer.Line("writer.WriteRaw(\",\"u8);");
         writer.Close();
         writer.Line("writer.WriteString(pair.Key);");
         writer.Line("writer.WriteRaw(\":\"u8);");
-        writer.Line(WriteCall(model.DictionaryValueType!, "pair.Value", "depth + 1"));
+        writer.Line(WriteCall(model.DictionaryValueType!, "pair.Value"));
+        writer.Open("if ((++index & 4095) == 0)");
+        writer.Line("writer.ThrowIfCancellationRequested();");
+        writer.Close();
         writer.Close();
         writer.Line("writer.WriteRaw(\"}\"u8);");
         writer.Line("writer.ExitContainer();");
@@ -232,8 +238,7 @@ internal sealed class JsonSourceEmitter
             writer.Line("writer.WriteRaw(" + GeneratedNaming.Utf8Literal(prefix) + ");");
             writer.Line(WriteCall(
                 property.Type,
-                "value." + GeneratedNaming.Identifier(property.Name),
-                "depth + 1"));
+                "value." + GeneratedNaming.Identifier(property.Name)));
         }
 
         writer.Line("writer.WriteRaw(\"}\"u8);");
@@ -509,9 +514,9 @@ internal sealed class JsonSourceEmitter
         writer.Line("};");
     }
 
-    private string WriteCall(ITypeSymbol type, string value, string depth)
+    private string WriteCall(ITypeSymbol type, string value)
     {
-        return CodecName(type) + ".WriteValue(ref writer, " + value + ", " + depth + ");";
+        return CodecName(type) + ".WriteValue(ref writer, " + value + ");";
     }
 
     private string ReadCall(ITypeSymbol type, string depth)

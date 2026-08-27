@@ -143,6 +143,66 @@ public sealed class GeneratorExecutionTests
     }
 
     [Fact]
+    public void Generated_writer_honors_cancellation_for_large_and_deep_values()
+    {
+        const string source = """
+            using System.Buffers;
+            using System.Collections.Generic;
+            using System.Threading;
+            using Miya.Json;
+
+            public sealed class Node { public Node? Next { get; set; } }
+            public static class Runner
+            {
+                private static MiyaJsonOptions CancelledOptions()
+                {
+                    var source = new CancellationTokenSource();
+                    source.Cancel();
+                    return new MiyaJsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
+                }
+
+                public static void WriteCollection()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new int[10_000], CancelledOptions());
+                }
+
+                public static void WriteDeep()
+                {
+                    var node = new Node();
+                    var current = node;
+                    for (var index = 0; index < 256; index++)
+                    {
+                        current.Next = new Node();
+                        current = current.Next;
+                    }
+
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, node, CancelledOptions());
+                }
+
+                public static void WriteLargeString()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new string('x', 128 * 1024), CancelledOptions());
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        AssertNoErrors(run);
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var runner = assembly.GetType("Runner")!;
+
+        foreach (var method in new[] { "WriteCollection", "WriteDeep", "WriteLargeString" })
+        {
+            var exception = Assert.Throws<TargetInvocationException>(
+                () => runner.GetMethod(method)!.Invoke(null, null));
+            Assert.IsType<OperationCanceledException>(exception.InnerException);
+        }
+    }
+
+    [Fact]
     public void Generated_writer_honors_configured_depth_and_collection_limits()
     {
         const string source = """

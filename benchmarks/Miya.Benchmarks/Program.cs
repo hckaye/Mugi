@@ -3,6 +3,7 @@ using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using Miya.Benchmarks;
+using Perfolizer.Horology;
 
 var shortRun = string.Equals(
     Environment.GetEnvironmentVariable("MIYA_BENCHMARK_SHORT"),
@@ -12,11 +13,22 @@ var finalRun = string.Equals(
     Environment.GetEnvironmentVariable("MIYA_BENCHMARK_FINAL"),
     "1",
     StringComparison.Ordinal);
+var serializerComparison =
+    !args.Contains("--routing", StringComparer.Ordinal) &&
+    !args.Contains("--spanjson", StringComparer.Ordinal);
+var finalJob = Job.Default
+    .WithWarmupCount(5)
+    .WithIterationCount(10)
+    .WithLaunchCount(1);
 var baseJob = shortRun
     ? Job.ShortRun
-    : finalRun
-        ? Job.Default.WithWarmupCount(5).WithIterationCount(10).WithLaunchCount(1)
-        : Job.Default;
+    : finalRun && serializerComparison
+        ? finalJob
+            .WithIterationCount(20)
+            .WithIterationTime(TimeInterval.FromMilliseconds(250))
+        : finalRun
+            ? finalJob
+            : Job.Default;
 var jitJobId = shortRun ? "JIT-Short" : finalRun ? "JIT-Final" : "JIT";
 var aotJobId = shortRun ? "NativeAOT-Short" : finalRun ? "NativeAOT-Final" : "NativeAOT";
 var jitConfig = ManualConfig.Create(DefaultConfig.Instance)

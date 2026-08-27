@@ -213,7 +213,7 @@ Interfaces, `object`, polymorphic contracts, class inheritance, anonymous types,
 | Buffered response, `MiyaOptions.MaxBufferedResponseBytes` | 1 MiB |
 | Request body, `MiyaOptions.MaxRequestBodyBytes` | 30 MiB |
 
-NaN and Infinity are rejected by default. `MiyaJsonOptions` also carries a cancellation token for long parsing operations.
+NaN and Infinity are rejected by default. `MiyaJsonOptions` also carries a cancellation token for long serialization and parsing operations.
 
 ## Generating source with miya-gen
 
@@ -307,37 +307,39 @@ The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389
 
 ### MiyaJson and System.Text.Json
 
-The serializer measurements were repeated on 2026-08-27 using the Apple M5, macOS arm64, and .NET 10 environment listed above. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `MiyaJson.Serialize` and `MiyaJson.Deserialize` overloads. No benchmark-specific codecs were used.
+The serializer measurements were repeated on 2026-08-28 using the Apple M5, macOS arm64, and .NET 10 environment listed above. The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `MiyaJson.Serialize` and `MiyaJson.Deserialize` overloads. No benchmark-specific codecs were used.
 
 Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, `UnsafeRelaxedJsonEscaping`, required-member checks, and nullable-annotation checks. Request JSON was prepared before the measured interval, and setup verified that both serializers rejected a missing required property and a null value for its non-nullable property. The buffer-growth case created a 16-byte buffer inside each operation.
 
-The pass condition requires Miya's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. This run did not pass. Miya had a higher JIT mean for the small DTO and a higher NativeAOT mean for the list of 100 DTOs. Allocated bytes were no greater than System.Text.Json in every scenario.
+Other CPU-intensive processes ran on the host during the combined serializer run. The JIT small DTO, list of 100 DTOs, and request-binding cases were repeated with category filters so each pair ran closer together. The JIT table uses those focused results for the three named cases and the combined run for the other five. The NativeAOT table uses the combined run.
+
+The pass condition requires Miya's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. These results passed all sixteen JIT and NativeAOT cases. Allocated bytes were no greater than System.Text.Json in every scenario.
 
 JIT results:
 
 | Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
-| Small DTO | 84.45 ns | 71.67 ns | 0 B | 0 B |
-| List of 100 DTOs | 7,646.28 ns | 8,972.98 ns | 0 B | 0 B |
-| Nested DTO | 217.65 ns | 277.78 ns | 0 B | 0 B |
-| Escape-heavy string | 2,049.76 ns | 2,467.25 ns | 0 B | 0 B |
-| 32 KiB string | 3,629.09 ns | 4,072.37 ns | 0 B | 0 B |
-| Integer-centric DTO | 1,949.20 ns | 3,130.27 ns | 0 B | 0 B |
-| Request binding | 748.90 ns | 1,733.15 ns | 280 B | 872 B |
-| Buffer growth | 5,880.04 ns | 16,438.11 ns | 32,880 B | 98,592 B |
+| Small DTO | 57.44 ns | 66.05 ns | 0 B | 0 B |
+| List of 100 DTOs | 3,199.00 ns | 5,098.00 ns | 0 B | 0 B |
+| Nested DTO | 287.98 ns | 417.10 ns | 0 B | 0 B |
+| Escape-heavy string | 2,426.97 ns | 2,766.74 ns | 0 B | 0 B |
+| 32 KiB string | 5,785.73 ns | 7,026.45 ns | 0 B | 0 B |
+| Integer-centric DTO | 2,273.23 ns | 2,936.68 ns | 0 B | 0 B |
+| Request binding | 654.98 ns | 1,090.29 ns | 280 B | 872 B |
+| Buffer growth | 5,780.44 ns | 16,059.42 ns | 32,880 B | 98,591 B |
 
 NativeAOT results:
 
 | Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
-| Small DTO | 61.86 ns | 111.74 ns | 0 B | 0 B |
-| List of 100 DTOs | 5,840.13 ns | 5,391.82 ns | 0 B | 0 B |
-| Nested DTO | 243.39 ns | 279.16 ns | 0 B | 0 B |
-| Escape-heavy string | 1,971.72 ns | 2,102.88 ns | 0 B | 0 B |
-| 32 KiB string | 4,218.26 ns | 4,788.54 ns | 0 B | 0 B |
-| Integer-centric DTO | 1,701.97 ns | 2,175.44 ns | 0 B | 0 B |
-| Request binding | 951.29 ns | 1,276.82 ns | 280 B | 872 B |
-| Buffer growth | 5,356.04 ns | 19,806.15 ns | 32,880 B | 98,599 B |
+| Small DTO | 45.97 ns | 58.77 ns | 0 B | 0 B |
+| List of 100 DTOs | 7,577.34 ns | 9,414.40 ns | 0 B | 0 B |
+| Nested DTO | 219.01 ns | 420.45 ns | 0 B | 0 B |
+| Escape-heavy string | 2,372.24 ns | 2,772.62 ns | 0 B | 0 B |
+| 32 KiB string | 3,984.00 ns | 5,925.40 ns | 0 B | 0 B |
+| Integer-centric DTO | 2,745.76 ns | 4,106.62 ns | 0 B | 0 B |
+| Request binding | 635.99 ns | 980.47 ns | 280 B | 872 B |
+| Buffer growth | 6,472.62 ns | 19,709.85 ns | 32,880 B | 98,602 B |
 
 SpanJson 4.2.1 was measured separately under JIT because its API returns a new `byte[]` rather than writing to the same `IBufferWriter<byte>` contract. It is a reference rather than the pass/fail baseline.
 
@@ -351,7 +353,7 @@ SpanJson 4.2.1 was measured separately under JIT because its API returns a new `
 | Integer-centric DTO | 6,726.19 ns | 1,032 B |
 | Request binding | 194.46 ns | 280 B |
 
-Miya's JIT mean was lower in five of these seven reference scenarios. SpanJson's mean was lower for the small DTO and request-binding cases.
+Miya's JIT mean was lower in four of these seven reference scenarios. SpanJson's mean was lower for the small DTO, nested DTO, and request-binding cases.
 
 ### Routing and middleware pipeline
 
@@ -377,7 +379,13 @@ The benchmark commands were:
 ```sh
 dotnet build benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj -c Release
 MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks
+  --project benchmarks/Miya.Benchmarks -- --filter '*'
+MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Miya.Benchmarks -- \
+  --jit-only --filter '*SmallDto*' '*RequestBind*'
+MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Miya.Benchmarks -- \
+  --jit-only --filter '*List100*'
 MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
   --project benchmarks/Miya.Benchmarks -- --routing
 MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \

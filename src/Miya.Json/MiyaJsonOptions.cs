@@ -29,6 +29,6 @@ public sealed class MiyaJsonOptions
     /// <summary>Rejects NaN and Infinity when false (the default). JSON has no representation for them.</summary>
     public bool AllowNonFiniteNumbers { get; init; }
 
-    /// <summary>Cancellation checked while parsing collections and long tokens.</summary>
+    /// <summary>Cancellation checked during long serialization and parsing operations.</summary>
     public CancellationToken CancellationToken { get; init; }
 }
