@@ -5,5 +5,8 @@
   <ItemGroup>
     <Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Miya.Generators.dll" />
     <CompilerVisibleProperty Include="MiyaJsonNaming" />
+    <CompilerVisibleProperty Include="RootNamespace" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApi" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApiNamespace" />
   </ItemGroup>
 </Project>

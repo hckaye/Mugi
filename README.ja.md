@@ -340,6 +340,28 @@ miya-gen openapi --project MyApp.csproj --output openapi.json
 
 レスポンスの判定はベストエフォートで、ルート登録時のハンドラーラムダを調べます。`c.Json(value)` があれば `application/json` のレスポンススキーマを、`c.Text(value)` があれば `text/plain` を出力します。どちらも判定できない場合、operation には content を指定しない 200 レスポンスだけが入ります。型付きルートには検証失敗時の 400 レスポンスも入ります。
 
+## OpenAPI ドキュメントの取り込み
+
+`Miya.Generators` はコンパイル時に既存の OpenAPI ドキュメントを読み込めます。上記の `miya-gen openapi` は C# のルートから OpenAPI ドキュメントを出力します。この設定は反対に、OpenAPI ドキュメントから C# を生成します。
+
+JSON ファイルを `AdditionalFiles` に追加し、`MiyaOpenApi` を指定します。
+
+```xml
+<ItemGroup>
+  <AdditionalFiles Include="api/openapi.json"
+                   MiyaOpenApi="true"
+                   MiyaOpenApiNamespace="MyApp.Api" />
+</ItemGroup>
+```
+
+`MiyaOpenApiNamespace` は生成する型の名前空間を指定します。省略した場合はプロジェクトのルート名前空間を使います。
+
+ジェネレーターは `components/schemas` から public な DTO record と string enum、各 operation のパスを持つ `Paths` クラス、operation ごとの入力 record と `ApiSchemas` フィールドを生成します。`/users/{id}` のような OpenAPI のパスパラメーターは、`/users/:id` のような Miya のパターンになります。生成される `.g.cs` はビルドごとに作り直されるため、変更は生成ソースではなく OpenAPI ドキュメントに加えます。
+
+OpenAPI 3.0 と 3.1 の JSON に対応します。schema では object、string enum、string、Boolean、`int32`、`int64`、`float`、`double`、`decimal`、配列、ローカルの `components/schemas` 参照、nullable、required を扱えます。operation の入力には path、query、header parameter と JSON object の request body を使えます。数値の上下限、整数の排他的な上下限、文字列長、pattern、default、optional を `Miya.Schema` の rule に変換します。
+
+合成 schema（`oneOf`、`anyOf`、`allOf`）、`additionalProperties`、外部参照、cookie parameter、JSON 以外の request body、`Miya.Schema` に対応する rule がない検証条件はスキップし、MIYA020 から MIYA023 の診断を出します。path と query parameter の名前は、生成される schema が同じ名前を使うため、有効な C# 識別子である必要があります。
+
 ## 型付きコンテキスト
 
 既定では、ハンドラーのコンテキストはリクエストとレスポンスのデータだけを運びます。自分の値をミドルウェアからハンドラーへ型安全に渡すには、`Context` を継承して `App<TContext>` を使います。文字列キーもキャストもありません。
@@ -438,7 +460,7 @@ Miya v0 は、WebSocket のアップグレードと静的ファイルの配信�
 
 ルートのジェネレーターは、リテラルのパターンをコンパイル時に検証・解析し、解析済みのテンプレートを埋め込みます。照合はランタイムマッチャーが行います。ルート単位の照合コードや統合した trie はまだ出力しません。
 
-診断 MIYA001 から MIYA004 は JSON とルートの生成を扱います。MIYA006 はリテラルの `c.Param` 呼び出しをハンドラーのルートと照合します。MIYA010 から MIYA015 は、型付き入力のルート割り当て、対応するフィールド型、スキーマ定義、検証規則、競合する割り当てを扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
+診断 MIYA001 から MIYA004 は JSON とルートの生成を扱います。MIYA006 はリテラルの `c.Param` 呼び出しをハンドラーのルートと照合します。MIYA010 から MIYA015 は、型付き入力のルート割り当て、対応するフィールド型、スキーマ定義、検証規則、競合する割り当てを扱います。MIYA020 から MIYA023 は、不正な OpenAPI ドキュメント、未対応の schema 構造、Miya に変換できない値、生成名の衝突を扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
 
 ## 謝辞
 

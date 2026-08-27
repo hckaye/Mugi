@@ -9,3 +9,7 @@ MIYA012 | Miya.Generators | Error | Unsupported schema field type
 MIYA013 | Miya.Generators | Error | Invalid schema definition
 MIYA014 | Miya.Generators | Error | Invalid schema validation rule
 MIYA015 | Miya.Generators | Error | Ambiguous schema binding
+MIYA020 | Miya.Generators | Error | Invalid OpenAPI import document
+MIYA021 | Miya.Generators | Error | Unsupported OpenAPI schema structure
+MIYA022 | Miya.Generators | Error | OpenAPI item cannot be represented by Miya
+MIYA023 | Miya.Generators | Error | OpenAPI generated name collision

@@ -30,18 +30,28 @@ internal static class GeneratorTestHelper
     internal static GeneratorRun Run(
         CSharpCompilation compilation,
         string naming = "camelCase",
-        bool trackSteps = false)
+        bool trackSteps = false,
+        IEnumerable<AdditionalText>? additionalTexts = null,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? additionalFileMetadata = null,
+        string rootNamespace = "GeneratedTests")
     {
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
             [new IncrementalGenerator().AsSourceGenerator()],
+            additionalTexts: additionalTexts?.ToImmutableArray() ?? ImmutableArray<AdditionalText>.Empty,
             parseOptions: ParseOptions,
-            optionsProvider: new TestAnalyzerConfigOptionsProvider(naming),
+            optionsProvider: new TestAnalyzerConfigOptionsProvider(
+                naming,
+                rootNamespace,
+                additionalFileMetadata),
             driverOptions: new GeneratorDriverOptions(
                 IncrementalGeneratorOutputKind.None,
                 trackIncrementalGeneratorSteps: trackSteps));
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out var diagnostics);
         return new GeneratorRun(driver, (CSharpCompilation)output, diagnostics, driver.GetRunResult());
     }
+
+    internal static AdditionalText AdditionalText(string path, string content) =>
+        new TestAdditionalText(path, content);
 
     internal static Assembly EmitAndLoad(CSharpCompilation compilation)
     {
@@ -71,26 +81,37 @@ internal static class GeneratorTestHelper
     private sealed class TestAnalyzerConfigOptionsProvider : AnalyzerConfigOptionsProvider
     {
         private readonly AnalyzerConfigOptions _global;
+        private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _additionalFileMetadata;
 
-        internal TestAnalyzerConfigOptionsProvider(string naming)
+        internal TestAnalyzerConfigOptionsProvider(
+            string naming,
+            string rootNamespace,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? additionalFileMetadata)
         {
-            _global = new TestAnalyzerConfigOptions(naming);
+            _global = new TestAnalyzerConfigOptions(naming, rootNamespace);
+            _additionalFileMetadata = additionalFileMetadata
+                ?? new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
         }
 
         public override AnalyzerConfigOptions GlobalOptions => _global;
 
         public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => EmptyAnalyzerConfigOptions.Instance;
 
-        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => EmptyAnalyzerConfigOptions.Instance;
+        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) =>
+            _additionalFileMetadata.TryGetValue(textFile.Path, out var metadata)
+                ? new AdditionalFileAnalyzerConfigOptions(metadata)
+                : EmptyAnalyzerConfigOptions.Instance;
     }
 
     private sealed class TestAnalyzerConfigOptions : AnalyzerConfigOptions
     {
         private readonly string _naming;
+        private readonly string _rootNamespace;
 
-        internal TestAnalyzerConfigOptions(string naming)
+        internal TestAnalyzerConfigOptions(string naming, string rootNamespace)
         {
             _naming = naming;
+            _rootNamespace = rootNamespace;
         }
 
         public override bool TryGetValue(string key, out string value)
@@ -98,6 +119,36 @@ internal static class GeneratorTestHelper
             if (key == "build_property.MiyaJsonNaming")
             {
                 value = _naming;
+                return true;
+            }
+
+            if (key == "build_property.RootNamespace")
+            {
+                value = _rootNamespace;
+                return true;
+            }
+
+            value = string.Empty;
+            return false;
+        }
+    }
+
+    private sealed class AdditionalFileAnalyzerConfigOptions : AnalyzerConfigOptions
+    {
+        private readonly IReadOnlyDictionary<string, string> _metadata;
+
+        internal AdditionalFileAnalyzerConfigOptions(IReadOnlyDictionary<string, string> metadata)
+        {
+            _metadata = metadata;
+        }
+
+        public override bool TryGetValue(string key, out string value)
+        {
+            const string prefix = "build_metadata.AdditionalFiles.";
+            if (key.StartsWith(prefix, StringComparison.Ordinal)
+                && _metadata.TryGetValue(key.Substring(prefix.Length), out var configuredValue))
+            {
+                value = configuredValue;
                 return true;
             }
 
@@ -115,6 +166,22 @@ internal static class GeneratorTestHelper
             value = string.Empty;
             return false;
         }
+    }
+
+    private sealed class TestAdditionalText : AdditionalText
+    {
+        private readonly Microsoft.CodeAnalysis.Text.SourceText _text;
+
+        internal TestAdditionalText(string path, string content)
+        {
+            Path = path;
+            _text = Microsoft.CodeAnalysis.Text.SourceText.From(content);
+        }
+
+        public override string Path { get; }
+
+        public override Microsoft.CodeAnalysis.Text.SourceText GetText(
+            CancellationToken cancellationToken = default) => _text;
     }
 }
 

@@ -24,6 +24,45 @@ public sealed class IncrementalGenerator : IIncrementalGenerator
         var settings = context.AnalyzerConfigOptionsProvider
             .Select(static (options, _) => ReadSettings(options.GlobalOptions));
 
+        var openApiDefaults = context.AnalyzerConfigOptionsProvider
+            .Select(static (options, _) => ReadOpenApiDefaults(options.GlobalOptions));
+        var openApiFiles = context.AdditionalTextsProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, cancellationToken) => ReadOpenApiFile(
+                pair.Left,
+                pair.Right.GetOptions(pair.Left),
+                cancellationToken))
+            .Where(static file => file is not null)
+            .Select(static (file, _) => file!)
+            .Combine(openApiDefaults)
+            .Select(static (pair, _) => new OpenApiImportInput(
+                pair.Left.Path,
+                pair.Left.Content,
+                pair.Left.TargetNamespace ?? pair.Right.RootNamespace,
+                pair.Right.Naming))
+            .WithComparer(OpenApiImportInputComparer.Instance)
+            .WithTrackingName("MiyaOpenApiInputs");
+        var openApiGeneration = openApiFiles
+            .Select(static (file, cancellationToken) =>
+                OpenApiImportGenerator.Generate(file, cancellationToken))
+            .WithTrackingName("MiyaOpenApiGeneration");
+        var openApiSources = openApiGeneration
+            .SelectMany(static (result, _) => result.Sources)
+            .WithComparer(GeneratedSourceComparer.Instance)
+            .WithTrackingName("MiyaOpenApiSources");
+        context.RegisterSourceOutput(
+            openApiSources,
+            static (productionContext, source) => AddSource(productionContext, source));
+        context.RegisterSourceOutput(
+            openApiGeneration,
+            static (productionContext, result) =>
+            {
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    productionContext.ReportDiagnostic(diagnostic);
+                }
+            });
+
         var analyses = context.SyntaxProvider.CreateSyntaxProvider(
                 static (node, _) => node is InvocationExpressionSyntax,
                 static (syntaxContext, cancellationToken) => InvocationAnalyzer.Analyze(
@@ -141,8 +180,80 @@ public sealed class IncrementalGenerator : IIncrementalGenerator
         return new GeneratorSettings(JsonNaming.CamelCase, emitInterceptors: true);
     }
 
+    private static OpenApiDefaults ReadOpenApiDefaults(AnalyzerConfigOptions options)
+    {
+        var naming = JsonNaming.CamelCase;
+        if (options.TryGetValue("build_property.MiyaJsonNaming", out var configuredNaming)
+            && string.Equals(configuredNaming, "PascalCase", StringComparison.OrdinalIgnoreCase))
+        {
+            naming = JsonNaming.PascalCase;
+        }
+
+        var rootNamespace = "OpenApi";
+        if (options.TryGetValue("build_property.RootNamespace", out var configuredNamespace)
+            && !string.IsNullOrWhiteSpace(configuredNamespace))
+        {
+            rootNamespace = configuredNamespace;
+        }
+
+        return new OpenApiDefaults(rootNamespace, naming);
+    }
+
+    private static OpenApiFile? ReadOpenApiFile(
+        AdditionalText text,
+        AnalyzerConfigOptions options,
+        System.Threading.CancellationToken cancellationToken)
+    {
+        if (!options.TryGetValue("build_metadata.AdditionalFiles.MiyaOpenApi", out var enabled)
+            || !string.Equals(enabled, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string? targetNamespace = null;
+        if (options.TryGetValue(
+                "build_metadata.AdditionalFiles.MiyaOpenApiNamespace",
+                out var configuredTargetNamespace)
+            && !string.IsNullOrWhiteSpace(configuredTargetNamespace))
+        {
+            targetNamespace = configuredTargetNamespace;
+        }
+
+        var content = text.GetText(cancellationToken)?.ToString() ?? string.Empty;
+        return new OpenApiFile(text.Path, content, targetNamespace);
+    }
+
     private static void AddSource(SourceProductionContext context, GeneratedSource source)
     {
         context.AddSource(source.HintName, SourceText.From(source.Source, System.Text.Encoding.UTF8));
+    }
+
+    private sealed class OpenApiFile
+    {
+        internal OpenApiFile(string path, string content, string? targetNamespace)
+        {
+            Path = path;
+            Content = content;
+            TargetNamespace = targetNamespace;
+        }
+
+        internal string Path { get; }
+
+        internal string Content { get; }
+
+        internal string? TargetNamespace { get; }
+    }
+
+    private sealed class OpenApiDefaults
+    {
+        internal OpenApiDefaults(string rootNamespace, JsonNaming naming)
+        {
+            RootNamespace = rootNamespace;
+            Naming = naming;
+        }
+
+        internal string RootNamespace { get; }
+
+        internal JsonNaming Naming { get; }
     }
 }

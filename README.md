@@ -340,6 +340,28 @@ Route parameters are emitted as required path parameters. A route that uses `Miy
 
 Response detection is best effort and examines the handler lambda at the registration site. A `c.Json(value)` call produces an `application/json` response schema, and `c.Text(value)` produces `text/plain`. When neither call can be identified, the operation has a 200 response without declared content. Typed routes also declare the validation-error 400 response.
 
+## Importing an OpenAPI document
+
+`Miya.Generators` can read an existing OpenAPI document during compilation. The `miya-gen openapi` command above goes from C# routes to an OpenAPI document; this setting goes from an OpenAPI document to generated C#.
+
+Add the JSON file as an `AdditionalFiles` item and mark it with `MiyaOpenApi`:
+
+```xml
+<ItemGroup>
+  <AdditionalFiles Include="api/openapi.json"
+                   MiyaOpenApi="true"
+                   MiyaOpenApiNamespace="MyApp.Api" />
+</ItemGroup>
+```
+
+`MiyaOpenApiNamespace` sets the namespace for the generated types. When it is omitted, the project root namespace is used.
+
+The generator produces public DTO records and string enums from `components/schemas`, a `Paths` class with one constant per operation, and an input record with an `ApiSchemas` field for each operation. OpenAPI path parameters such as `/users/{id}` become Miya patterns such as `/users/:id`. Each build recreates the generator-owned `.g.cs` file, so changes belong in the OpenAPI document rather than the generated source.
+
+The importer accepts OpenAPI 3.0 and 3.1 JSON. It supports object schemas, string enums, strings, Boolean values, `int32`, `int64`, `float`, `double`, `decimal`, arrays, local `components/schemas` references, nullable fields, and required fields. Operation input supports path, query, and header parameters plus JSON object request bodies. It maps numeric bounds, exclusive integer bounds, string lengths, patterns, defaults, and optional fields to `Miya.Schema` rules.
+
+Composed schemas (`oneOf`, `anyOf`, and `allOf`), `additionalProperties`, external references, cookie parameters, non-JSON request bodies, and validation constraints without a `Miya.Schema` equivalent are skipped with MIYA020 through MIYA023 diagnostics. Path and query parameter names must also be valid C# identifiers because their generated schema mappings use the same names.
+
 ## Typed contexts
 
 By default a handler's context carries only request and response data. To pass your own values from middleware to a handler with full type safety, derive from `Context` and use `App<TContext>`. There are no string keys and no casts.
@@ -437,7 +459,7 @@ Miya v0 does not support WebSocket upgrades, serve static files, or provide auth
 
 The route generator validates and parses literal patterns at compile time and embeds the parsed templates; the runtime matcher does the matching. It does not yet emit route-specific matching code or a combined trie.
 
-Diagnostics MIYA001 through MIYA004 cover JSON and route generation. MIYA006 checks literal `c.Param` calls against their handler's route. MIYA010 through MIYA015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
+Diagnostics MIYA001 through MIYA004 cover JSON and route generation. MIYA006 checks literal `c.Param` calls against their handler's route. MIYA010 through MIYA015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. MIYA020 through MIYA023 cover invalid OpenAPI imports, unsupported schema structures, values that cannot be mapped to Miya, and generated-name collisions. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
 ## Acknowledgments
 

@@ -130,6 +130,78 @@ public sealed class IncrementalGeneratorTests
         AssertTrackedSourceUnchanged(result, "MiyaInterceptorSources", "SecondRoutes");
     }
 
+    [Fact]
+    public void Unrelated_source_edit_reuses_openapi_import_output()
+    {
+        const string path = "api/openapi.json";
+        const string openApi = """
+            {
+              "openapi": "3.1.0",
+              "paths": {
+                "/health": {
+                  "get": { "operationId": "health" }
+                }
+              }
+            }
+            """;
+        var additionalText = GeneratorTestHelper.AdditionalText(path, openApi);
+        var metadata = OpenApiMetadata(path);
+        var compilation = GeneratorTestHelper.CreateCompilation("internal static class Application { }");
+        var first = GeneratorTestHelper.Run(
+            compilation,
+            trackSteps: true,
+            additionalTexts: [additionalText],
+            additionalFileMetadata: metadata);
+        var updated = compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(
+            "internal static class Unrelated { internal const int Value = 2; }",
+            GeneratorTestHelper.ParseOptions,
+            "Unrelated.cs"));
+
+        var driver = first.Driver.RunGeneratorsAndUpdateCompilation(updated, out _, out _);
+        var result = driver.GetRunResult().Results.Single();
+
+        Assert.All(
+            result.TrackedSteps["MiyaOpenApiInputs"].SelectMany(static step => step.Outputs),
+            static output => Assert.True(
+                output.Reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
+        Assert.All(
+            result.TrackedSteps["MiyaOpenApiSources"].SelectMany(static step => step.Outputs),
+            static output => Assert.True(
+                output.Reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
+    }
+
+    [Fact]
+    public void Openapi_content_edit_updates_openapi_import_output()
+    {
+        const string path = "api/openapi.json";
+        const string firstOpenApi = """
+            { "openapi": "3.1.0", "paths": { "/first": { "get": { "operationId": "first" } } } }
+            """;
+        const string changedOpenApi = """
+            { "openapi": "3.1.0", "paths": { "/second": { "get": { "operationId": "second" } } } }
+            """;
+        var firstText = GeneratorTestHelper.AdditionalText(path, firstOpenApi);
+        var changedText = GeneratorTestHelper.AdditionalText(path, changedOpenApi);
+        var compilation = GeneratorTestHelper.CreateCompilation("internal static class Application { }");
+        var first = GeneratorTestHelper.Run(
+            compilation,
+            trackSteps: true,
+            additionalTexts: [firstText],
+            additionalFileMetadata: OpenApiMetadata(path));
+
+        var driver = first.Driver
+            .ReplaceAdditionalText(firstText, changedText)
+            .RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var generated = string.Join(
+            Environment.NewLine,
+            driver.GetRunResult().Results.Single().GeneratedSources
+                .Where(static source => source.HintName.StartsWith("Miya.OpenApi.", StringComparison.Ordinal))
+                .Select(static source => source.SourceText.ToString()));
+
+        Assert.Contains("public const string Second = \"/second\";", generated, StringComparison.Ordinal);
+        Assert.DoesNotContain("public const string First = \"/first\";", generated, StringComparison.Ordinal);
+    }
+
     private static void AssertTrackedSourceUnchanged(
         GeneratorRunResult result,
         string stepName,
@@ -147,4 +219,15 @@ public sealed class IncrementalGeneratorTests
             static output => Assert.True(
                 output.Reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
     }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> OpenApiMetadata(
+        string path) =>
+        new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal)
+        {
+            [path] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["MiyaOpenApi"] = "true",
+                ["MiyaOpenApiNamespace"] = "MyApp.Api",
+            },
+        };
 }
