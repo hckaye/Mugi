@@ -6,7 +6,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>miya-gen</ToolCommandName>
     <PackageId>Miya.Gen</PackageId>
-    <Description>Generates Miya JSON codecs and route templates without compiler-integrated source generators.</Description>
+    <Description>Generates Miya source files and OpenAPI documents from a project.</Description>
   </PropertyGroup>
 
   <ItemGroup>

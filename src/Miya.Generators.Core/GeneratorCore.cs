@@ -25,6 +25,15 @@ public static class GeneratorCore
             throw new ArgumentNullException(nameof(settings));
         }
 
+        var analyses = AnalyzeCompilation(compilation, settings.EmitInterceptors, cancellationToken);
+        return GenerateFromAnalyses(analyses, settings);
+    }
+
+    internal static ImmutableArray<InvocationAnalysis> AnalyzeCompilation(
+        Compilation compilation,
+        bool includeInterceptLocations,
+        CancellationToken cancellationToken)
+    {
         var analyses = ImmutableArray.CreateBuilder<InvocationAnalysis>();
         foreach (var syntaxTree in compilation.SyntaxTrees.OrderBy(static tree => tree.FilePath, StringComparer.Ordinal))
         {
@@ -36,7 +45,7 @@ public static class GeneratorCore
                 var analysis = InvocationAnalyzer.Analyze(
                     semanticModel,
                     invocation,
-                    settings.EmitInterceptors,
+                    includeInterceptLocations,
                     cancellationToken);
                 if (analysis is not null)
                 {
@@ -45,7 +54,7 @@ public static class GeneratorCore
             }
         }
 
-        return GenerateFromAnalyses(analyses.ToImmutable(), settings);
+        return analyses.ToImmutable();
     }
 
     internal static GenerationResult GenerateFromAnalyses(

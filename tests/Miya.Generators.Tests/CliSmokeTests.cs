@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace Miya.Generators.Tests;
 
@@ -75,6 +76,40 @@ public sealed class CliSmokeTests
         finally
         {
             Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Openapi_command_writes_document()
+    {
+        var root = FindRepositoryRoot();
+        var fixture = Path.Combine(root, "tests", "Miya.Generators.Tests", "fixtures", "CliSmoke", "CliSmoke.csproj");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "miya-gen-openapi-" + Guid.NewGuid().ToString("N"));
+        var output = Path.Combine(outputDirectory, "openapi.json");
+        Directory.CreateDirectory(outputDirectory);
+        try
+        {
+            var restore = await Run(root, "restore", fixture);
+            Assert.Equal(0, restore.ExitCode);
+
+            var generate = await Run(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "openapi", "--project", fixture, "--output", output);
+
+            Assert.Equal(0, generate.ExitCode);
+            Assert.True(File.Exists(output));
+            Assert.Contains(output, generate.StandardOutput, StringComparison.Ordinal);
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(output));
+            Assert.Equal("3.1.0", document.RootElement.GetProperty("openapi").GetString());
+            Assert.Equal("CliSmoke", document.RootElement.GetProperty("info").GetProperty("title").GetString());
+            Assert.Equal("0.1.0", document.RootElement.GetProperty("info").GetProperty("version").GetString());
+            Assert.True(document.RootElement.GetProperty("paths").TryGetProperty("/cli/{id}", out _));
+            Assert.True(document.RootElement.TryGetProperty("components", out _));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
         }
     }
 

@@ -10,15 +10,15 @@ internal static class ProgramEntry
 {
     internal static async Task<int> Run(string[] args)
     {
-        if (!TryParseArguments(args, out var projectPath, out var outputPath, out var argumentError))
+        if (!TryParseArguments(args, out var options, out var argumentError))
         {
             Console.Error.WriteLine("miya-gen: " + argumentError);
-            Console.Error.WriteLine("Usage: miya-gen --project <project.csproj> --output <directory>");
+            WriteUsage(args.Length != 0 && args[0] == "openapi");
             return 2;
         }
 
-        projectPath = Path.GetFullPath(projectPath!);
-        outputPath = Path.GetFullPath(outputPath!);
+        var projectPath = Path.GetFullPath(options!.ProjectPath);
+        var outputPath = Path.GetFullPath(options.OutputPath);
         if (!File.Exists(projectPath))
         {
             Console.Error.WriteLine("miya-gen: project file does not exist: " + projectPath);
@@ -63,36 +63,54 @@ internal static class ProgramEntry
                 return 6;
             }
 
-            var naming = ReadNaming(projectPath, project);
-            var result = GeneratorCore.Generate(
-                compilation,
-                new GeneratorSettings(naming, emitInterceptors: false));
-            foreach (var diagnostic in result.Diagnostics.OrderBy(static item => item.Location.SourceSpan.Start))
+            var projectSettings = ReadProjectSettings(projectPath, project);
+            if (options.Command == Command.OpenApi)
             {
-                Console.Error.WriteLine(diagnostic.ToString());
+                var document = OpenApiDocumentBuilder.Build(
+                    compilation,
+                    new OpenApiSettings(
+                        projectSettings.ProjectName,
+                        projectSettings.Version,
+                        projectSettings.Naming));
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                await File.WriteAllTextAsync(
+                    outputPath,
+                    document,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)).ConfigureAwait(false);
+                Console.WriteLine(outputPath);
             }
-
-            if (result.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            else
             {
-                Console.Error.WriteLine("miya-gen: generation failed because the project contains Miya generator errors.");
-                return 4;
-            }
+                var result = GeneratorCore.Generate(
+                    compilation,
+                    new GeneratorSettings(projectSettings.Naming, emitInterceptors: false));
+                foreach (var diagnostic in result.Diagnostics.OrderBy(static item => item.Location.SourceSpan.Start))
+                {
+                    Console.Error.WriteLine(diagnostic.ToString());
+                }
 
-            Directory.CreateDirectory(outputPath);
-            foreach (var oldFile in Directory.EnumerateFiles(
-                         outputPath,
-                         "Miya.*.g.cs",
-                         SearchOption.TopDirectoryOnly))
-            {
-                File.Delete(oldFile);
-            }
+                if (result.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+                {
+                    Console.Error.WriteLine("miya-gen: generation failed because the project contains Miya generator errors.");
+                    return 4;
+                }
 
-            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-            foreach (var source in result.Sources)
-            {
-                var destination = Path.Combine(outputPath, source.HintName);
-                await File.WriteAllTextAsync(destination, source.Source, encoding).ConfigureAwait(false);
-                Console.WriteLine(destination);
+                Directory.CreateDirectory(outputPath);
+                foreach (var oldFile in Directory.EnumerateFiles(
+                             outputPath,
+                             "Miya.*.g.cs",
+                             SearchOption.TopDirectoryOnly))
+                {
+                    File.Delete(oldFile);
+                }
+
+                var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+                foreach (var source in result.Sources)
+                {
+                    var destination = Path.Combine(outputPath, source.HintName);
+                    await File.WriteAllTextAsync(destination, source.Source, encoding).ConfigureAwait(false);
+                    Console.WriteLine(destination);
+                }
             }
 
             if (workspaceFailures.Count != 0)
@@ -109,18 +127,36 @@ internal static class ProgramEntry
         }
     }
 
-    private static JsonNaming ReadNaming(string projectPath, Project project)
+    private static ProjectSettings ReadProjectSettings(string projectPath, Project project)
     {
+        var naming = JsonNaming.CamelCase;
         if (project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions.TryGetValue(
                 "build_property.MiyaJsonNaming",
                 out var analyzerNaming))
         {
-            return ParseNaming(analyzerNaming);
+            naming = ParseNaming(analyzerNaming);
         }
 
         using var projectCollection = new Microsoft.Build.Evaluation.ProjectCollection();
         var evaluatedProject = projectCollection.LoadProject(projectPath);
-        return ParseNaming(evaluatedProject.GetPropertyValue("MiyaJsonNaming"));
+        if (string.IsNullOrWhiteSpace(analyzerNaming))
+        {
+            naming = ParseNaming(evaluatedProject.GetPropertyValue("MiyaJsonNaming"));
+        }
+
+        var projectName = evaluatedProject.GetPropertyValue("MSBuildProjectName");
+        if (string.IsNullOrWhiteSpace(projectName))
+        {
+            projectName = project.Name;
+        }
+
+        var version = evaluatedProject.GetPropertyValue("PackageVersion");
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            version = evaluatedProject.GetPropertyValue("Version");
+        }
+
+        return new ProjectSettings(projectName, version, naming);
     }
 
     private static JsonNaming ParseNaming(string? naming)
@@ -132,14 +168,22 @@ internal static class ProgramEntry
 
     private static bool TryParseArguments(
         string[] args,
-        out string? project,
-        out string? output,
+        out CommandOptions? options,
         out string? error)
     {
-        project = null;
-        output = null;
+        options = null;
         error = null;
-        for (var index = 0; index < args.Length; index++)
+        var command = Command.Generate;
+        var startIndex = 0;
+        if (args.Length != 0 && args[0] == "openapi")
+        {
+            command = Command.OpenApi;
+            startIndex = 1;
+        }
+
+        string? project = null;
+        string? output = null;
+        for (var index = startIndex; index < args.Length; index++)
         {
             var argument = args[index];
             if (argument != "--project" && argument != "--output")
@@ -182,7 +226,15 @@ internal static class ProgramEntry
             return false;
         }
 
+        options = new CommandOptions(command, project, output);
         return true;
+    }
+
+    private static void WriteUsage(bool openApi)
+    {
+        Console.Error.WriteLine(openApi
+            ? "Usage: miya-gen openapi --project <project.csproj> --output <openapi.json>"
+            : "Usage: miya-gen --project <project.csproj> --output <directory>");
     }
 
     private static void WriteWorkspaceFailures(IEnumerable<string> failures)
@@ -192,4 +244,14 @@ internal static class ProgramEntry
             Console.Error.WriteLine("miya-gen: MSBuild workspace: " + failure);
         }
     }
+
+    private enum Command
+    {
+        Generate,
+        OpenApi,
+    }
+
+    private sealed record CommandOptions(Command Command, string ProjectPath, string OutputPath);
+
+    private sealed record ProjectSettings(string ProjectName, string Version, JsonNaming Naming);
 }
