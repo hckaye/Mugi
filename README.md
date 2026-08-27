@@ -1,6 +1,6 @@
 # Miya
 
-Miya is a small HTTP framework for .NET 10 designed around NativeAOT. It uses Kestrel without `WebApplication` or the Generic Host and does not require a DI container. The runtime performs no reflection, assembly scanning, or runtime code generation. Handlers are lambdas rather than attributed controller methods.
+Miya is a small HTTP framework for .NET 10 designed around NativeAOT. Applications do not require `WebApplication`, the Generic Host, or a DI container. Miya constructs Kestrel directly for cleartext HTTP/1.1 and HTTP/2, and uses Kestrel's built-in service registration internally for TLS and HTTP/3. The runtime performs no reflection, assembly scanning, or runtime code generation. Handlers are lambdas rather than attributed controller methods.
 
 Route templates and JSON codecs are generated at compile time. The routing generator validates literal patterns and embeds parsed templates; v0 still uses the shared runtime matcher. Generated JSON codecs register themselves through module initializers. The request API follows a context model with `Text`, `Json`, `Param`, and `Query` methods. Middleware is composed in onion order around the selected route.
 
@@ -240,7 +240,7 @@ The project must compile before generation. Existing `Miya.*.g.cs` files in the 
 
 ## Kestrel hosting
 
-`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified, allowing the `PORT` environment variable to take effect. `Run(8080)` is an explicit selection.
+`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified, allowing the `PORT` environment variable to take effect. `Run(8080)` is an explicit selection. `MiyaOptions.Protocols` and `MiyaOptions.Certificate` configure other protocols through `RunAsync` or `StartAsync`.
 
 `RunAsync(MiyaOptions?, CancellationToken)` and `StartAsync(MiyaOptions?, CancellationToken)` provide asynchronous hosting. `StartAsync` returns a `MiyaServer` with the bound addresses and `StopAsync`. Port 0 requests an operating-system-assigned port.
 
@@ -248,7 +248,45 @@ Port selection uses an explicit `Run(port)` value first, then `MiyaOptions.Port`
 
 SIGINT, SIGTERM, and cancellation stop new requests and wait for active requests. The default shutdown timeout is 30 seconds. A second signal terminates the process immediately. Response bodies remain buffered until middleware returns unless they exceed the 1 MiB default or `Stream` is used; headers can be changed after `next` only while the response remains buffered.
 
-Miya v0 guarantees cleartext HTTP/1.1 only. Terminate TLS at a reverse proxy. `ConfigureKestrel` is available for supported Kestrel settings, but calling `UseHttps` is unsupported because this host does not construct the services required by Kestrel's HTTPS extensions.
+Without a certificate, the default protocol is HTTP/1.1. Select `MiyaProtocols.Http2` for cleartext HTTP/2 prior knowledge:
+
+```csharp
+await app.RunAsync(new MiyaOptions
+{
+    Protocols = MiyaProtocols.Http2,
+});
+```
+
+A cleartext listener cannot serve HTTP/1.1 and HTTP/2 together because it has no ALPN negotiation. Miya rejects that combination at startup.
+
+Pass an `X509Certificate2` to terminate TLS in Miya. The default with a certificate is HTTP/1.1 and HTTP/2, selected through ALPN:
+
+```csharp
+using System.Security.Cryptography.X509Certificates;
+
+using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
+    "server.pfx",
+    "certificate-password");
+
+await app.RunAsync(new MiyaOptions
+{
+    Certificate = certificate,
+});
+```
+
+HTTP/3 is opt-in and requires a certificate. Add the `Http3` flag while retaining HTTP/1.1 and HTTP/2 so clients can discover HTTP/3 through Kestrel's `Alt-Svc` response header:
+
+```csharp
+await app.RunAsync(new MiyaOptions
+{
+    Certificate = certificate,
+    Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+});
+```
+
+Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `QuicListener.IsSupported` is false. On the macOS arm64 system used for the measurements below, `QuicListener.IsSupported` returned false. The HTTP/3 integration test was skipped on that condition. Kestrel enables `Alt-Svc` automatically when HTTP/1.1 or HTTP/2 shares an endpoint with HTTP/3.
+
+`ConfigureKestrel` remains available for other supported Kestrel settings. Certificate selection belongs in `MiyaOptions.Certificate`; Miya does not search for a development certificate or load Kestrel endpoint configuration files.
 
 ## Measured results
 
@@ -260,10 +298,10 @@ Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, m
 
 | Metric | Result |
 | --- | ---: |
-| `Hello` executable size | 6,099,624 bytes (5.82 MiB) |
-| Process start through completed `GET /`, 10-run median | 7.297 ms |
+| `Hello` executable size | 7,128,392 bytes (6.80 MiB) |
+| Process start through completed `GET /`, 10-run median | 8.443 ms |
 
-The startup samples were 8.672, 7.432, 7.156, 6.907, 7.161, 7.513, 7.488, 7.025, 7.152, and 7.432 ms. Each run started a new NativeAOT process on a new loopback port and stopped it after receiving the complete HTTP response.
+The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389, 7.446, and 8.114 ms. Each run started a new NativeAOT process on a new loopback port and stopped it after receiving the complete HTTP response.
 
 ### MiyaJson and System.Text.Json
 
@@ -341,7 +379,7 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 limitations
 
-Miya v0 does not terminate HTTPS, support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, validation, templates, or configuration-file integration. It does not guarantee HTTP/2 or HTTP/3. A reverse proxy is required for TLS.
+Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, validation, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains optional for TLS termination.
 
 The route generator does not emit route-specific matching code or a combined trie in v0. It validates and parses literal patterns at compile time, then embeds the parsed templates for the runtime matcher.
 

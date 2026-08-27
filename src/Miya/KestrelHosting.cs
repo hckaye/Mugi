@@ -1,12 +1,17 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Net;
+using System.Net.Quic;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -16,7 +21,7 @@ public partial class App<TContext>
     where TContext : Context, new()
 {
     /// <summary>
-    /// Runs an HTTP/1.1 cleartext server and blocks the calling thread until shutdown completes.
+    /// Runs the configured HTTP server and blocks the calling thread until shutdown completes.
     /// </summary>
     public void Run(int? port = null)
     {
@@ -29,7 +34,7 @@ public partial class App<TContext>
     }
 
     /// <summary>
-    /// Runs an HTTP/1.1 cleartext server until cancellation or a termination signal requests shutdown.
+    /// Runs the configured HTTP server until cancellation or a termination signal requests shutdown.
     /// </summary>
     public Task RunAsync(MiyaOptions? options = null, CancellationToken ct = default) =>
         RunAsyncCore(explicitPort: null, options, ct);
@@ -51,8 +56,7 @@ public partial class App<TContext>
     }
 
     /// <summary>
-    /// Starts an HTTP/1.1 cleartext server. Calling UseHttps from ConfigureKestrel is unsupported because
-    /// this manual host does not create the DI services that UseHttps requires.
+    /// Starts the configured HTTP server.
     /// </summary>
     public Task<MiyaServer> StartAsync(
         MiyaOptions? options = null,
@@ -71,11 +75,38 @@ public partial class App<TContext>
             effectiveOptions.Port,
             Environment.GetEnvironmentVariable("PORT"));
         var loggerFactory = effectiveOptions.LoggerFactory ?? NullLoggerFactory.Instance;
+        var protocols = effectiveOptions.Protocols;
+
+        if ((protocols & MiyaProtocols.Http3) != 0 && !QuicListener.IsSupported)
+        {
+            throw new PlatformNotSupportedException(
+                "HTTP/3 was requested, but System.Net.Quic.QuicListener.IsSupported is false on this platform.");
+        }
+
+        if (port == 0
+            && (protocols & MiyaProtocols.Http3) != 0
+            && (protocols & (MiyaProtocols.Http1 | MiyaProtocols.Http2)) != 0)
+        {
+            port = FindAvailableTcpAndUdpPort();
+        }
+
+        return effectiveOptions.Certificate is null
+            ? await StartDirectAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false)
+            : await StartServiceBackedAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false);
+    }
+
+    private async Task<MiyaServer> StartDirectAsync(
+        MiyaOptions options,
+        int port,
+        MiyaProtocols protocols,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
         var kestrelOptions = new KestrelServerOptions();
         kestrelOptions.Listen(
             IPAddress.Loopback,
             port,
-            static listenOptions => listenOptions.Protocols = HttpProtocols.Http1);
+            listenOptions => ConfigureListenOptions(listenOptions, options, protocols, loggerFactory));
 
         var transportFactory = new SocketTransportFactory(
             Microsoft.Extensions.Options.Options.Create(new SocketTransportOptions()),
@@ -87,22 +118,14 @@ public partial class App<TContext>
 
         try
         {
-            effectiveOptions.ConfigureKestrel?.Invoke(kestrelOptions);
-            var application = new KestrelApplication<TContext>(this, effectiveOptions, Build());
+            options.ConfigureKestrel?.Invoke(kestrelOptions);
+            var application = new KestrelApplication<TContext>(this, options, Build());
             await kestrel.StartAsync(application, ct).ConfigureAwait(false);
-
-            var addressFeature = kestrel.Features.Get<IServerAddressesFeature>()
-                ?? throw new InvalidOperationException("Kestrel did not publish its listening addresses.");
-            var addresses = addressFeature.Addresses.ToArray();
-            if (addresses.Length == 0)
-            {
-                throw new InvalidOperationException("Kestrel did not publish a listening address.");
-            }
-
             return new MiyaServer(
                 kestrel,
-                addresses,
-                effectiveOptions.ShutdownTimeout,
+                kestrel,
+                GetListeningAddresses(kestrel),
+                options.ShutdownTimeout,
                 loggerFactory);
         }
         catch
@@ -110,6 +133,136 @@ public partial class App<TContext>
             kestrel.Dispose();
             throw;
         }
+    }
+
+    private async Task<MiyaServer> StartServiceBackedAsync(
+        MiyaOptions options,
+        int port,
+        MiyaProtocols protocols,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        // The public KestrelServer constructor accepts only a TCP transport, while UseHttps and
+        // the QUIC transport depend on internal Kestrel services. Use Kestrel's public registrations
+        // to obtain an IServer, then start Miya's IHttpApplication directly.
+        IHost? host = null;
+        try
+        {
+            host = new HostBuilder()
+                .ConfigureWebHost(webHost => webHost
+                    .ConfigureServices(services => services.AddSingleton(loggerFactory))
+                    .UseKestrel(kestrelOptions =>
+                    {
+                        kestrelOptions.Listen(
+                            IPAddress.Loopback,
+                            port,
+                            listenOptions => ConfigureListenOptions(
+                                listenOptions,
+                                options,
+                                protocols,
+                                loggerFactory));
+                        options.ConfigureKestrel?.Invoke(kestrelOptions);
+                    })
+                    .Configure(static _ => { }))
+                .Build();
+
+            var server = host.Services.GetRequiredService<IServer>();
+            var application = new KestrelApplication<TContext>(this, options, Build());
+            await server.StartAsync(application, ct).ConfigureAwait(false);
+            return new MiyaServer(
+                server,
+                host,
+                GetListeningAddresses(server),
+                options.ShutdownTimeout,
+                loggerFactory);
+        }
+        catch
+        {
+            host?.Dispose();
+            throw;
+        }
+    }
+
+    private static void ConfigureListenOptions(
+        ListenOptions listenOptions,
+        MiyaOptions options,
+        MiyaProtocols protocols,
+        ILoggerFactory loggerFactory)
+    {
+        listenOptions.Protocols = ToKestrelProtocols(protocols);
+        listenOptions.DisableAltSvcHeader = false;
+
+        if (options.Certificate is null)
+        {
+            return;
+        }
+
+        var applicationServices = listenOptions.KestrelServerOptions.ApplicationServices
+            ?? throw new InvalidOperationException(
+                "Kestrel did not initialize the services required for TLS.");
+        listenOptions.KestrelServerOptions.ApplicationServices = new LoggingServiceProvider(
+            applicationServices,
+            loggerFactory.CreateLogger("Miya.Kestrel.ApplicationServices"));
+        listenOptions.UseHttps(options.Certificate);
+    }
+
+    private static HttpProtocols ToKestrelProtocols(MiyaProtocols protocols)
+    {
+        var result = HttpProtocols.None;
+        if ((protocols & MiyaProtocols.Http1) != 0)
+        {
+            result |= HttpProtocols.Http1;
+        }
+
+        if ((protocols & MiyaProtocols.Http2) != 0)
+        {
+            result |= HttpProtocols.Http2;
+        }
+
+        if ((protocols & MiyaProtocols.Http3) != 0)
+        {
+            result |= HttpProtocols.Http3;
+        }
+
+        return result;
+    }
+
+    private static string[] GetListeningAddresses(IServer server)
+    {
+        var addressFeature = server.Features.Get<IServerAddressesFeature>()
+            ?? throw new InvalidOperationException("Kestrel did not publish its listening addresses.");
+        var addresses = addressFeature.Addresses.ToArray();
+        if (addresses.Length == 0)
+        {
+            throw new InvalidOperationException("Kestrel did not publish a listening address.");
+        }
+
+        return addresses;
+    }
+
+    private static int FindAvailableTcpAndUdpPort()
+    {
+        // Kestrel cannot assign one dynamic port to a combined TCP and QUIC endpoint. Select a port
+        // that is free for both transports before Kestrel binds it.
+        const int maximumAttempts = 10;
+        for (var attempt = 0; attempt < maximumAttempts; attempt++)
+        {
+            using var tcpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            tcpSocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            var port = ((IPEndPoint)tcpSocket.LocalEndPoint!).Port;
+
+            using var udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                udpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                return port;
+            }
+            catch (SocketException) when (attempt + 1 < maximumAttempts)
+            {
+            }
+        }
+
+        throw new IOException("Unable to find a loopback port available for both TCP and UDP.");
     }
 
     internal static int ResolvePort(
@@ -212,19 +365,22 @@ public partial class App<TContext>
 /// </summary>
 public sealed class MiyaServer : IAsyncDisposable
 {
-    private readonly KestrelServer _server;
+    private readonly IServer _server;
+    private readonly IDisposable _owner;
     private readonly TimeSpan _shutdownTimeout;
     private readonly ILogger _logger;
     private readonly object _sync = new();
     private Task? _stopTask;
 
     internal MiyaServer(
-        KestrelServer server,
+        IServer server,
+        IDisposable owner,
         string[] addresses,
         TimeSpan shutdownTimeout,
         ILoggerFactory loggerFactory)
     {
         _server = server;
+        _owner = owner;
         _shutdownTimeout = shutdownTimeout;
         _logger = loggerFactory.CreateLogger<MiyaServer>();
         Addresses = new ReadOnlyCollection<string>(addresses);
@@ -271,8 +427,28 @@ public sealed class MiyaServer : IAsyncDisposable
         }
         finally
         {
-            _server.Dispose();
+            _owner.Dispose();
         }
+    }
+}
+
+internal sealed class LoggingServiceProvider : IServiceProvider
+{
+    private readonly IServiceProvider _services;
+    private readonly ILogger _logger;
+
+    public LoggingServiceProvider(IServiceProvider services, ILogger logger)
+    {
+        _services = services;
+        _logger = logger;
+    }
+
+    public object? GetService(Type serviceType)
+    {
+        _logger.LogDebug(
+            "Kestrel ApplicationServices requested {ServiceType}.",
+            serviceType.FullName ?? serviceType.Name);
+        return _services.GetService(serviceType);
     }
 }
 

@@ -1,7 +1,12 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Quic;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Miya.IntegrationTests;
 
@@ -205,6 +210,110 @@ public sealed class KestrelIntegrationTests
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task CleartextHttp2SupportsPriorKnowledge()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            Protocols = MiyaProtocols.Http2,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var request = CreateGetRequest(HttpVersion.Version20);
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpVersion.Version20, response.Version);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task CertificateEnablesHttp1AndHttp2WithAlpn()
+    {
+        using var certificate = CreateCertificate();
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            Certificate = certificate,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateTlsClient(server);
+
+        using var http1Request = CreateGetRequest(HttpVersion.Version11);
+        using var http1Response = await client.SendAsync(http1Request);
+        Assert.Equal(HttpStatusCode.OK, http1Response.StatusCode);
+        Assert.Equal(HttpVersion.Version11, http1Response.Version);
+        Assert.Equal("Hello", await http1Response.Content.ReadAsStringAsync());
+
+        using var http2Request = CreateGetRequest(HttpVersion.Version20);
+        using var http2Response = await client.SendAsync(http2Request);
+        Assert.Equal(HttpStatusCode.OK, http2Response.StatusCode);
+        Assert.Equal(HttpVersion.Version20, http2Response.Version);
+        Assert.Equal("Hello", await http2Response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task TlsLogsServicesRequestedThroughKestrelApplicationServices()
+    {
+        using var certificate = CreateCertificate();
+        using var loggerFactory = new RecordingLoggerFactory();
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            Certificate = certificate,
+            LoggerFactory = loggerFactory,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+
+        Assert.Equal(
+            [
+                "Microsoft.AspNetCore.Server.Kestrel.Core.IHttpsConfigurationService",
+                "Microsoft.Extensions.Logging.ILoggerFactory",
+                "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure.KestrelMetrics",
+            ],
+            loggerFactory.ApplicationServiceRequests);
+        Assert.Contains("Microsoft.AspNetCore.Server.Kestrel", loggerFactory.Categories);
+    }
+
+    [QuicFact(Timeout = TestTimeoutMilliseconds)]
+    public async Task Http3UsesTlsAndAdvertisesAltSvcWhenQuicIsSupported()
+    {
+        using var certificate = CreateCertificate();
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            Certificate = certificate,
+            Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateTlsClient(server);
+
+        using var http2Request = CreateGetRequest(HttpVersion.Version20);
+        using var http2Response = await client.SendAsync(http2Request);
+        Assert.Equal(HttpVersion.Version20, http2Response.Version);
+        Assert.True(http2Response.Headers.TryGetValues("Alt-Svc", out var altSvcValues));
+        Assert.Contains(altSvcValues, value => value.Contains("h3=", StringComparison.Ordinal));
+
+        using var http3Request = CreateGetRequest(HttpVersion.Version30);
+        using var http3Response = await client.SendAsync(http3Request);
+        Assert.Equal(HttpStatusCode.OK, http3Response.StatusCode);
+        Assert.Equal(HttpVersion.Version30, http3Response.Version);
+        Assert.Equal("Hello", await http3Response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
     public async Task GracefulShutdownWaitsForActiveRequest()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -230,6 +339,53 @@ public sealed class KestrelIntegrationTests
 
             release.TrySetResult();
             using var response = await responseTask.WaitAsync(OperationTimeout);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("done", await response.Content.ReadAsStringAsync());
+            await stopTask.WaitAsync(OperationTimeout);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task GracefulShutdownWaitsForActiveHttp2Request()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var app = new App();
+        app.Get("/slow", async context =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+            await context.Text("done");
+        });
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            Protocols = MiyaProtocols.Http2,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/slow")
+        {
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+        };
+        var responseTask = client.SendAsync(request);
+
+        try
+        {
+            await entered.Task.WaitAsync(OperationTimeout);
+            var stopTask = server.StopAsync();
+            await Task.Delay(100);
+            Assert.False(stopTask.IsCompleted);
+
+            release.TrySetResult();
+            using var response = await responseTask.WaitAsync(OperationTimeout);
+            Assert.Equal(HttpVersion.Version20, response.Version);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("done", await response.Content.ReadAsStringAsync());
             await stopTask.WaitAsync(OperationTimeout);
@@ -322,6 +478,117 @@ public sealed class KestrelIntegrationTests
         BaseAddress = new Uri(server.Addresses[0]),
         Timeout = OperationTimeout,
     };
+
+    private static HttpClient CreateTlsClient(MiyaServer server)
+    {
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+        };
+        return new HttpClient(handler)
+        {
+            BaseAddress = new Uri(server.Addresses[0]),
+            Timeout = OperationTimeout,
+        };
+    }
+
+    private static HttpRequestMessage CreateGetRequest(Version version) => new(HttpMethod.Get, "/")
+    {
+        Version = version,
+        VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+    };
+
+    private static X509Certificate2 CreateCertificate()
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=localhost",
+            key,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+            critical: false));
+        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+        var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
+        subjectAlternativeNames.AddDnsName("localhost");
+        subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(subjectAlternativeNames.Build());
+
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow.AddDays(1));
+        return X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pkcs12), password: null);
+    }
+}
+
+internal sealed class QuicFactAttribute : FactAttribute
+{
+    public QuicFactAttribute()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            Skip = "System.Net.Quic.QuicListener.IsSupported is false on this platform.";
+        }
+    }
+}
+
+internal sealed class RecordingLoggerFactory : ILoggerFactory
+{
+    private const string CategoryName = "Miya.Kestrel.ApplicationServices";
+    private const string MessagePrefix = "Kestrel ApplicationServices requested ";
+    private readonly List<string> _applicationServiceRequests = [];
+    private readonly List<string> _categories = [];
+
+    public IReadOnlyList<string> ApplicationServiceRequests => _applicationServiceRequests;
+
+    public IReadOnlyList<string> Categories => _categories;
+
+    public void AddProvider(ILoggerProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        provider.Dispose();
+    }
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        _categories.Add(categoryName);
+        return categoryName == CategoryName ? new RecordingLogger(_applicationServiceRequests) : NullLogger.Instance;
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class RecordingLogger(List<string> applicationServiceRequests) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel == LogLevel.Debug;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            var message = formatter(state, exception);
+            if (message.StartsWith(MessagePrefix, StringComparison.Ordinal)
+                && message.EndsWith(".", StringComparison.Ordinal))
+            {
+                applicationServiceRequests.Add(message[MessagePrefix.Length..^1]);
+            }
+        }
+    }
 }
 
 internal sealed class RawHttpConnection : IAsyncDisposable
