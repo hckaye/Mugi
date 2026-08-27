@@ -326,6 +326,17 @@ ReflectionCodecs.Enable();
 ```
 
 The fallback is disabled by default. It supports the same primitive values, arrays, `List<T>`, `Dictionary<string, T>`, nullable values, enums, POCOs, and records with camel-case property names. `Miya.Reflection` does not support NativeAOT; use generated codecs when publishing with AOT.
+## OpenAPI
+
+`miya-gen openapi` reads the routes in a compiled project and writes an OpenAPI 3.1 document:
+
+```sh
+miya-gen openapi --project MyApp.csproj --output openapi.json
+```
+
+Route parameters are emitted as required path parameters. A route that uses `Miya.Schema` also includes the source, type, default, and supported validation constraints for its path, query, header, and JSON body fields. Referenced JSON DTOs are placed under `components/schemas`.
+
+Response detection is best effort and examines the handler lambda at the registration site. A `c.Json(value)` call produces an `application/json` response schema, and `c.Text(value)` produces `text/plain`. When neither call can be identified, the operation has a 200 response without declared content. Typed routes also declare the validation-error 400 response.
 
 ## Typed contexts
 
@@ -510,7 +521,7 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 limitations
 
-Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
+Miya v0 does not support WebSocket upgrades, serve static files, or provide authentication, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
 
 The route generator validates and parses literal patterns at compile time and embeds the parsed templates; the runtime matcher does the matching. It does not yet emit route-specific matching code or a combined trie.
 

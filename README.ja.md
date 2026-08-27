@@ -326,6 +326,17 @@ ReflectionCodecs.Enable();
 ```
 
 フォールバックは既定で無効です。生成 codec と同じプリミティブ、配列、`List<T>`、`Dictionary<string, T>`、nullable 値、enum、POCO、record を扱い、プロパティ名には camelCase を使います。`Miya.Reflection` は NativeAOT に対応しません。AOT で publish する場合は生成 codec を使います。
+## OpenAPI 出力
+
+`miya-gen openapi` はコンパイル済みプロジェクトのルートを読み、OpenAPI 3.1 ドキュメントを書き出します。
+
+```sh
+miya-gen openapi --project MyApp.csproj --output openapi.json
+```
+
+ルートパラメータは必須の path parameter になります。`Miya.Schema` を使うルートでは、path、query、header、JSON body の各フィールドについて、取得元、型、既定値、対応する検証条件も出力します。参照される JSON DTO は `components/schemas` に入ります。
+
+レスポンスの判定はベストエフォートで、ルート登録時のハンドラーラムダを調べます。`c.Json(value)` があれば `application/json` のレスポンススキーマを、`c.Text(value)` があれば `text/plain` を出力します。どちらも判定できない場合、operation には content を指定しない 200 レスポンスだけが入ります。型付きルートには検証失敗時の 400 レスポンスも入ります。
 
 ## 型付きコンテキスト
 
@@ -510,7 +521,7 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 の制限
 
-Miya v0 は、WebSocket のアップグレード、静的ファイルの配信、OpenAPI ドキュメントの生成に対応しません。認証、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは選択肢として使えます。
+Miya v0 は、WebSocket のアップグレードと静的ファイルの配信に対応しません。認証、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは選択肢として使えます。
 
 ルートのジェネレーターは、リテラルのパターンをコンパイル時に検証・解析し、解析済みのテンプレートを埋め込みます。照合はランタイムマッチャーが行います。ルート単位の照合コードや統合した trie はまだ出力しません。
 
