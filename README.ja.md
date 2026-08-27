@@ -529,6 +529,17 @@ Miya v0 は、WebSocket のアップグレードと静的ファイルの配信�
 
 診断 MIYA001 から MIYA004 は JSON とルートの生成を扱います。MIYA006 はリテラルの `c.Param` 呼び出しをハンドラーのルートと照合します。MIYA010 から MIYA015 は、型付き入力のルート割り当て、対応するフィールド型、スキーマ定義、検証規則、競合する割り当てを扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
 
+## 謝辞
+
+Miya の設計は、他のフレームワークやライブラリを参考にしています。
+
+- [Hono](https://hono.dev) は表層の API を形作りました。コンテキストオブジェクト（`c.Text`、`c.Json`、`c.Param`）、`:name` と `*name` のルート構文、onion 順のミドルウェア、Hono の `Hono<Env>` に対応する型付き `App<TContext>` です。
+- [zod](https://zod.dev) は、型付き入力のコード定義バリデーションの参考です。
+- JSON シリアライザーは [MessagePack-CSharp](https://github.com/MessagePack-CSharp/MessagePack-CSharp) と [MemoryPack](https://github.com/Cysharp/MemoryPack) の考え方に沿っています。`IBufferWriter<byte>` の上の `ref struct` ライター、ソース生成の codec、実行時ディスパッチではなく module initializer による登録です。性能改善は、河合宜文（neuecc）が [neue.cc](https://neue.cc/2026/07/06_highperformancecode_with_ai.html) で示すベンチマーク駆動の方法に従いました。
+- Miya は ASP.NET Core の [Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel) の上で動きます。
+
+これらは設計上の影響への謝辞です。Miya はこれらのプロジェクトのコードを含みません。移植したコードがあれば [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) に記載します。
+
 ## ライセンス
 
 Miya は MIT License です。[LICENSE](LICENSE) を参照してください。

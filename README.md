@@ -529,6 +529,17 @@ The route generator validates and parses literal patterns at compile time and em
 
 Diagnostics MIYA001 through MIYA004 cover JSON and route generation. MIYA006 checks literal `c.Param` calls against their handler's route. MIYA010 through MIYA015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
+## Acknowledgments
+
+Miya's design borrows from other frameworks and libraries.
+
+- [Hono](https://hono.dev) shaped the surface API: the context object (`c.Text`, `c.Json`, `c.Param`), the `:name` and `*name` route syntax, onion-order middleware, and the typed `App<TContext>` that mirrors Hono's `Hono<Env>`.
+- [zod](https://zod.dev) inspired the code-defined validation for typed input.
+- The JSON serializer follows ideas from [MessagePack-CSharp](https://github.com/MessagePack-CSharp/MessagePack-CSharp) and [MemoryPack](https://github.com/Cysharp/MemoryPack): a `ref struct` writer over `IBufferWriter<byte>`, source-generated codecs, and module-initializer registration instead of runtime dispatch. The performance work followed the benchmark-driven method that Yoshifumi Kawai (neuecc) describes at [neue.cc](https://neue.cc/2026/07/06_highperformancecode_with_ai.html).
+- Miya runs on [Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel) from ASP.NET Core.
+
+These credits acknowledge design influence. Miya does not include code from these projects; any ported code is listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+
 ## License
 
 Miya is licensed under the MIT License. See [LICENSE](LICENSE).
