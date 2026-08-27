@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+  <ItemGroup>
+    <Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Miya.Generators.dll" />
+    <CompilerVisibleProperty Include="MiyaJsonNaming" />
+  </ItemGroup>
+</Project>

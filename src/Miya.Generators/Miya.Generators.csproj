@@ -3,11 +3,21 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <PackageId>Miya.Generators</PackageId>
+    <Description>Compile-time JSON codecs and route templates for Miya.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
-    <ProjectReference Include="../Miya.Generators.Core/Miya.Generators.Core.csproj" />
+    <ProjectReference Include="../Miya.Generators.Core/Miya.Generators.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
+    <None Include="$(OutputPath)Miya.Generators.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
+    <None Include="buildTransitive/Miya.Generators.props" Pack="true" PackagePath="buildTransitive/Miya.Generators.props" />
   </ItemGroup>
 
 </Project>

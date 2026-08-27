@@ -81,6 +81,11 @@ internal sealed class RoutePattern
         return new RoutePattern(pattern, segments, [.. parameterNames]);
     }
 
+    internal static RoutePattern CreatePrecompiled(
+        string original,
+        RouteSegment[] segments,
+        string[] parameterNames) => new(original, segments, parameterNames);
+
     public bool TryMatch(ReadOnlySpan<char> path, Span<ParameterCapture> captures)
     {
         if (Segments.Length == 0)
