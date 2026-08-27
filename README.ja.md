@@ -402,6 +402,10 @@ Miya v0 は、WebSocket のアップグレード、静的ファイルの配信�
 
 診断 MIYA001 から MIYA004 は、匿名 JSON 型、不正なルート、限定的な重複ルート検出、非対応の JSON 型を扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装です。`IPoolableContext.OnReturn()` は呼び出し側の責任のままです。
 
+## ライセンス
+
+Miya は MIT License です。[LICENSE](LICENSE) を参照してください。
+
 ## サードパーティー表記
 
 サードパーティーの謝辞は [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) に記録しています。

@@ -402,6 +402,10 @@ The route generator does not emit route-specific matching code or a combined tri
 
 Diagnostics MIYA001 through MIYA004 cover anonymous JSON types, invalid routes, limited duplicate-route detection, and unsupported JSON types. The planned MIYA005 diagnostic for fields left uncleared by pooled derived contexts is not implemented. `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
+## License
+
+Miya is licensed under the MIT License. See [LICENSE](LICENSE).
+
 ## Third-party notices
 
 Third-party acknowledgements are recorded in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
