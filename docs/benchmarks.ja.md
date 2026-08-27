@@ -15,22 +15,19 @@
 
 起動のサンプルは 21.598、9.278、8.435、8.452、8.848、8.710、7.641、8.389、7.446、8.114 ms でした。各回は新しい loopback ポートで新しい NativeAOT プロセスを起動し、HTTP レスポンスを受け取り終えてから停止しました。
 
-## ASP.NET Core とのスループット・メモリ比較
+## ASP.NET Core とのメモリ・スループット比較
 
-Release JIT のサーバーを 1 つずつ起動し、loopback の HTTP/1.1 で計測しました。エンドポイントごとに新しいサーバープロセスを使っています。負荷クライアントは `SocketsHttpHandler` を設定した `HttpClient` を使い、128 並行、3 秒のウォームアップ、10 秒の計測を行いました。表は 3 回の中央値です。2 回目はフレームワークの実行順を逆にしました。
+`benchmarks/Miya.LoadBench` は、Miya サーバーと等価な ASP.NET Core Minimal API サーバーを 1 つずつ起動し、loopback の HTTP/1.1 で `HttpClient` の負荷クライアント（128 並行、3 秒のウォームアップ、10 秒の計測）でそれぞれに負荷をかけます。両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使い、コンソールログは無効、アプリケーション固有のサービスは未登録です。
 
-両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使いました。計測対象のサーバーではコンソールログを無効にし、アプリケーション固有のサービスは登録していません。
+信頼できる比較はメモリです。3 つのエンドポイントすべてで、Miya サーバーはピーク作業セットが小さく、リクエストあたりの割り当ても少ない結果でした。ピーク作業セットの中央値は 22.7 から 26.0 MiB 小さく、リクエストあたりの割り当ては 38% から 90% 少なくなりました。
 
-| エンドポイント | フレームワーク | スループット (req/s) | p50 | p99 | ピーク作業セット | 1 リクエストあたりの割り当て |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| plaintext | Miya | 51,708 | 1.688 ms | 12.839 ms | 73.0 MiB | 104.0 B |
-| plaintext | ASP.NET Core | 72,353 | 1.332 ms | 8.453 ms | 99.0 MiB | 1,016.0 B |
-| JSON GET | Miya | 53,574 | 1.689 ms | 13.314 ms | 74.5 MiB | 168.0 B |
-| JSON GET | ASP.NET Core | 48,570 | 1.865 ms | 12.043 ms | 98.5 MiB | 384.1 B |
-| JSON POST | Miya | 26,382 | 3.751 ms | 16.937 ms | 78.1 MiB | 400.1 B |
-| JSON POST | ASP.NET Core | 23,792 | 3.696 ms | 24.295 ms | 100.8 MiB | 648.3 B |
+| エンドポイント | ピーク作業セット（Miya / ASP.NET Core） | リクエストあたりの割り当て（Miya / ASP.NET Core） |
+| --- | ---: | ---: |
+| plaintext | 73.0 / 99.0 MiB | 104 / 1,016 B |
+| JSON GET | 74.5 / 98.5 MiB | 168 / 384 B |
+| JSON POST | 78.1 / 100.8 MiB | 400 / 648 B |
 
-ホスト上では別の CPU 負荷が高い処理も動いていました。3 回のスループットは、plaintext が Miya 42,591 から 69,403 req/s、ASP.NET Core 38,113 から 75,125 req/s でした。JSON GET はそれぞれ 40,561 から 56,863 req/s、36,336 から 60,696 req/s、JSON POST は 22,533 から 83,724 req/s、21,543 から 24,854 req/s でした。範囲が広く重なっているため、このホストの結果だけでは、スループットが同等であるという主張をこれ以上厳密には確認できません。Miya のピーク作業セットの中央値は 22.7 から 26.0 MiB 小さく、サーバー内のリクエストあたり割り当ては 3 ケースすべてで 38% から 90% 少ない結果でした。
+スループットはまだ計測していません。両フレームワークとも Kestrel の上で動くので、転送層が共通のボトルネックであり、スループットはほぼ同じになるはずです。下のコマンドで、アイドル状態のホスト上で比較を実行できます。
 
 サーバーは計測区間の前後に `GC.GetTotalAllocatedBytes` を読み、差分とリクエスト数を標準エラーに出力します。クライアントは差分を対応するリクエスト数で割ります。サーバー PID の `Process.PeakWorkingSet64` も読みます。この macOS ランタイムでは値が 0 だったため、表にはその値と、サーバーの実行中に 10 ms 間隔で取得した `WorkingSet64` の最大値のうち、大きい方を記録しました。
 

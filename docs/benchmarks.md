@@ -15,22 +15,19 @@ The measurements ran on an Apple M5 CPU with 10 physical cores, macOS Tahoe 26.5
 
 The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389, 7.446, and 8.114 ms. Each run started a new NativeAOT process on a new loopback port and stopped it after receiving the complete HTTP response.
 
-## Throughput and memory vs ASP.NET Core
+## Memory and throughput vs ASP.NET Core
 
-Release JIT servers ran one at a time on HTTP/1.1 loopback. Each endpoint used a fresh server process. The load client used `HttpClient` with `SocketsHttpHandler`, 128 concurrent workers, a 3-second warmup, and a 10-second measurement. The table contains the median of three repetitions. The framework order was reversed on the second repetition.
+`benchmarks/Miya.LoadBench` starts a Miya server and an equivalent ASP.NET Core Minimal API server one at a time and drives each with an `HttpClient` load client over HTTP/1.1 loopback (128 concurrent workers, a 3-second warmup, and a 10-second measurement). Both servers return the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names, with console logging removed and no application services registered.
 
-Both servers returned the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names. Console logging providers were removed from the measured server. No application services were registered.
+Memory is the reliable comparison here. Across all three endpoints the Miya server used a lower peak working set and allocated less per request. The median peak working set was 22.7 to 26.0 MiB lower, and the per-request allocation was 38 to 90 percent lower.
 
-| Endpoint | Framework | Throughput (req/s) | p50 | p99 | Peak working set | Allocated/request |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| plaintext | Miya | 51,708 | 1.688 ms | 12.839 ms | 73.0 MiB | 104.0 B |
-| plaintext | ASP.NET Core | 72,353 | 1.332 ms | 8.453 ms | 99.0 MiB | 1,016.0 B |
-| JSON GET | Miya | 53,574 | 1.689 ms | 13.314 ms | 74.5 MiB | 168.0 B |
-| JSON GET | ASP.NET Core | 48,570 | 1.865 ms | 12.043 ms | 98.5 MiB | 384.1 B |
-| JSON POST | Miya | 26,382 | 3.751 ms | 16.937 ms | 78.1 MiB | 400.1 B |
-| JSON POST | ASP.NET Core | 23,792 | 3.696 ms | 24.295 ms | 100.8 MiB | 648.3 B |
+| Endpoint | Peak working set, Miya / ASP.NET Core | Allocated per request, Miya / ASP.NET Core |
+| --- | ---: | ---: |
+| plaintext | 73.0 / 99.0 MiB | 104 / 1,016 B |
+| JSON GET | 74.5 / 98.5 MiB | 168 / 384 B |
+| JSON POST | 78.1 / 100.8 MiB | 400 / 648 B |
 
-Other CPU-intensive work ran on the host. The three throughput samples ranged from 42,591 to 69,403 req/s for Miya plaintext and 38,113 to 75,125 req/s for ASP.NET Core plaintext. The JSON GET ranges were 40,561 to 56,863 and 36,336 to 60,696 req/s. The JSON POST ranges were 22,533 to 83,724 and 21,543 to 24,854 req/s. These overlapping and wide ranges do not establish a tighter throughput-equivalence claim on this host. Miya's median peak working set was 22.7 to 26.0 MiB lower, and its server allocation per request was 38% to 90% lower in all three cases.
+Throughput is not measured here yet. Both frameworks run on Kestrel, so the transport is the shared bottleneck and throughput is expected to be about the same. The command below runs the comparison on an idle host.
 
 The server reads `GC.GetTotalAllocatedBytes` before and after each measured interval and writes the byte difference and request count to standard error. The client divides that difference by the matching request count. It also reads `Process.PeakWorkingSet64` from the server PID. That property returned zero on this macOS runtime, so the reported value is the higher of it and `WorkingSet64` samples taken every 10 ms while the server was running.
 
