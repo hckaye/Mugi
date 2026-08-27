@@ -21,6 +21,7 @@ public ref struct MiyaJsonWriter
     private Span<byte> _buffer;
     private int _pendingBytes;
     private int _remainingDocumentBytes;
+    private int _depth;
 
     public MiyaJsonWriter(IBufferWriter<byte> destination, MiyaJsonOptions options)
     {
@@ -32,6 +33,45 @@ public ref struct MiyaJsonWriter
         _buffer = destination.GetSpan();
         _pendingBytes = 0;
         _remainingDocumentBytes = options.MaxDocumentByteLength;
+        _depth = 0;
+    }
+
+    /// <summary>
+    /// Enters an object or array and validates its nesting depth and element count.
+    /// Generated codecs call this before writing every container.
+    /// </summary>
+    public void EnterContainer(int elementCount)
+    {
+        if (elementCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(elementCount));
+        }
+
+        _options.CancellationToken.ThrowIfCancellationRequested();
+        if (_depth >= _options.MaxDepth)
+        {
+            throw new MiyaJsonException(
+                $"The JSON nesting depth exceeds the {_options.MaxDepth}-level limit.");
+        }
+
+        if (elementCount > _options.MaxCollectionSize)
+        {
+            throw new MiyaJsonException(
+                $"The container exceeds the {_options.MaxCollectionSize}-element limit.");
+        }
+
+        _depth++;
+    }
+
+    /// <summary>Leaves an object or array previously entered with <see cref="EnterContainer"/>.</summary>
+    public void ExitContainer()
+    {
+        if (_depth == 0)
+        {
+            throw new MiyaJsonException("No JSON container is currently open.");
+        }
+
+        _depth--;
     }
 
     /// <summary>Writes trusted, pre-encoded JSON fragments such as property names and structural tokens.</summary>

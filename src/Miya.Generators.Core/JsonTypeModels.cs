@@ -524,22 +524,9 @@ internal static class TypeNames
 
     internal static string CodecName(ITypeSymbol type)
     {
-        var key = Key(type);
-        var builder = new System.Text.StringBuilder("Codec_");
-        foreach (var character in key)
-        {
-            if (char.IsLetterOrDigit(character))
-            {
-                builder.Append(character);
-            }
-            else
-            {
-                builder.Append('_');
-                builder.Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
-                builder.Append('_');
-            }
-        }
-
-        return builder.ToString();
+        var normalized = type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated
+            ? type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)
+            : type;
+        return GeneratedNaming.StableIdentifier("Codec_", Key(normalized));
     }
 }

@@ -42,13 +42,14 @@ public sealed class GeneratorSnapshotTests
         Assert.Empty(run.DriverDiagnostics);
         Assert.DoesNotContain(run.Result.Diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         Assert.DoesNotContain(run.Compilation.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        var codecs = run.Source("Miya.JsonCodecs.g.cs");
-        Assert.Contains("private const int MaxDepth = 64;", codecs, StringComparison.Ordinal);
+        var codecs = run.SourcesWithPrefix("Miya.JsonCodec.");
+        Assert.Contains("writer.EnterContainer", codecs, StringComparison.Ordinal);
+        Assert.DoesNotContain("private const int MaxDepth = 64;", codecs, StringComparison.Ordinal);
         Assert.Contains("MemoryExtensions.SequenceEqual(propertyName, \"name\"u8)", codecs, StringComparison.Ordinal);
         Assert.Contains("reader.SkipValue();", codecs, StringComparison.Ordinal);
         Assert.Contains("writer.WriteRaw(\"{\\\"name\\\":\"u8);", codecs, StringComparison.Ordinal);
         Assert.Contains("global::System.Collections.Generic.Dictionary", codecs, StringComparison.Ordinal);
-        Assert.Contains("MiyaJsonGeneratedRegistration", run.Source("Miya.JsonRegistration.g.cs"), StringComparison.Ordinal);
+        Assert.Contains("MiyaJsonGeneratedRegistration", codecs, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -62,6 +63,6 @@ public sealed class GeneratorSnapshotTests
 
         var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source), "PascalCase");
 
-        Assert.Contains("{\\\"UserId\\\":", run.Source("Miya.JsonCodecs.g.cs"), StringComparison.Ordinal);
+        Assert.Contains("{\\\"UserId\\\":", run.SourcesWithPrefix("Miya.JsonCodec."), StringComparison.Ordinal);
     }
 }

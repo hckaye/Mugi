@@ -39,8 +39,8 @@ dotnet restore "$transitive_project" --configfile "$script_dir/NuGet.config" --f
 dotnet build "$direct_project" -c Release --no-restore
 dotnet build "$transitive_project" -c Release --no-restore
 
-find "$script_dir/DirectLibrary/obj/generated" -name 'Miya.Interceptors.g.cs' -print | grep .
-find "$script_dir/TransitiveApp/obj/generated" -name 'Miya.Interceptors.g.cs' -print | grep .
+find "$script_dir/DirectLibrary/obj/generated" -name 'Miya.Interceptor.*.g.cs' -print | grep .
+find "$script_dir/TransitiveApp/obj/generated" -name 'Miya.Interceptor.*.g.cs' -print | grep .
 
 jit_output=$(dotnet run --project "$transitive_project" -c Release --no-restore)
 printf '%s\n' "$jit_output"

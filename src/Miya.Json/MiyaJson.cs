@@ -19,6 +19,17 @@ public static class MiyaJson
     public static IMiyaJsonCodec<T> GetCodec<T>() => Registry<T>.Instance ?? throw MissingCodec<T>();
 
     /// <summary>
+    /// Returns the registered codec for <typeparamref name="T"/> when one is available;
+    /// otherwise returns the generated codec supplied by an intercepted call site.
+    /// </summary>
+    public static IMiyaJsonCodec<T> ResolveCodec<T>(IMiyaJsonCodec<T> generated)
+    {
+        ArgumentNullException.ThrowIfNull(generated);
+        var registered = Registry<T>.Instance;
+        return registered is null || ReferenceEquals(registered, generated) ? generated : registered;
+    }
+
+    /// <summary>
     /// Marks <typeparamref name="T"/> for codec generation. Needed only for types that never
     /// appear as a concrete type argument at a Json call site (for example, types used solely
     /// through generic helpers). Has no effect at runtime.

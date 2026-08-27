@@ -22,6 +22,13 @@ public sealed class GeneratorSettings
     public MiyaJsonNaming Naming { get; }
 
     public bool EmitInterceptors { get; }
+
+    public override bool Equals(object? obj) =>
+        obj is GeneratorSettings other
+        && Naming == other.Naming
+        && EmitInterceptors == other.EmitInterceptors;
+
+    public override int GetHashCode() => ((int)Naming * 397) ^ (EmitInterceptors ? 1 : 0);
 }
 
 public sealed class GeneratedSource

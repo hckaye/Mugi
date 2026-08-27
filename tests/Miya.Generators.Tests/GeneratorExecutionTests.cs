@@ -91,7 +91,138 @@ public sealed class GeneratorExecutionTests
 
         var exception = Assert.Throws<TargetInvocationException>(
             () => assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
-        Assert.IsType<Miya.Json.MiyaJsonException>(exception.InnerException);
+        var jsonException = Assert.IsType<Miya.Json.MiyaJsonException>(exception.InnerException);
+        Assert.True(jsonException.IsInputError);
+    }
+
+    [Fact]
+    public void Generated_reader_honors_cancellation_for_large_and_deep_inputs()
+    {
+        const string source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Text;
+            using System.Threading;
+            using Miya.Json;
+
+            public sealed class Node { public Node? Next { get; set; } }
+            public static class Runner
+            {
+                private static MiyaJsonOptions CancelledOptions()
+                {
+                    var source = new CancellationTokenSource();
+                    source.Cancel();
+                    return new MiyaJsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
+                }
+
+                public static void ReadCollection()
+                {
+                    var json = Encoding.UTF8.GetBytes("[" + string.Join(',', new int[10_000]) + "]");
+                    MiyaJson.Deserialize<List<int>>(json, CancelledOptions());
+                }
+
+                public static void ReadDeep()
+                {
+                    var json = Encoding.UTF8.GetBytes(new string('[', 256) + "null" + new string(']', 256));
+                    MiyaJson.Deserialize<List<List<int>>>(json, CancelledOptions());
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        AssertNoErrors(run);
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var runner = assembly.GetType("Runner")!;
+
+        var collection = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("ReadCollection")!.Invoke(null, null));
+        var deep = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("ReadDeep")!.Invoke(null, null));
+        Assert.IsType<OperationCanceledException>(collection.InnerException);
+        Assert.IsType<OperationCanceledException>(deep.InnerException);
+    }
+
+    [Fact]
+    public void Generated_writer_honors_configured_depth_and_collection_limits()
+    {
+        const string source = """
+            using System.Buffers;
+            using System.Collections.Generic;
+            using Miya.Json;
+
+            public sealed class Child { public int Id { get; set; } }
+            public sealed class Payload { public Child? Child { get; set; } }
+            public static class Runner
+            {
+                public static void WriteDepth()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new Payload { Child = new Child { Id = 1 } },
+                        new MiyaJsonOptions { MaxDepth = 1 });
+                }
+
+                public static void WriteCollection()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new List<int> { 1, 2 },
+                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                }
+
+                public static void WriteArray()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new int[] { 1, 2 },
+                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                }
+
+                public static void WriteDictionary()
+                {
+                    var buffer = new ArrayBufferWriter<byte>();
+                    MiyaJson.Serialize(buffer, new Dictionary<string, int> { ["a"] = 1, ["b"] = 2 },
+                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        AssertNoErrors(run);
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var runner = assembly.GetType("Runner")!;
+
+        var depth = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("WriteDepth")!.Invoke(null, null));
+        var collection = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("WriteCollection")!.Invoke(null, null));
+        var array = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("WriteArray")!.Invoke(null, null));
+        var dictionary = Assert.Throws<TargetInvocationException>(
+            () => runner.GetMethod("WriteDictionary")!.Invoke(null, null));
+        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(depth.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(collection.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(array.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(dictionary.InnerException).IsInputError);
+    }
+
+    [Fact]
+    public void Generated_small_integer_overflow_is_classified_as_input_error()
+    {
+        const string source = """
+            using Miya.Json;
+            public static class Runner
+            {
+                public static void Run() => MiyaJson.Deserialize<byte>("256"u8);
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        AssertNoErrors(run);
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+
+        var invocation = Assert.Throws<TargetInvocationException>(
+            () => assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
+        var exception = Assert.IsType<Miya.Json.MiyaJsonException>(invocation.InnerException);
+        Assert.True(exception.IsInputError);
+        Assert.IsType<OverflowException>(exception.InnerException);
     }
 
     private static void AssertNoErrors(GeneratorRun run)

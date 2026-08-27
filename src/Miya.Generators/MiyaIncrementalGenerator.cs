@@ -14,6 +14,13 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        context.RegisterPostInitializationOutput(static productionContext =>
+            productionContext.AddSource(
+                "Miya.InterceptsLocationAttribute.g.cs",
+                SourceText.From(
+                    RouteAndInterceptorEmitter.EmitInterceptsLocationAttribute(),
+                    System.Text.Encoding.UTF8)));
+
         var settings = context.AnalyzerConfigOptionsProvider
             .Select(static (options, _) => ReadSettings(options.GlobalOptions));
 
@@ -36,37 +43,66 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
 
         var jsonCodecInputs = jsonTypes.Collect().Combine(settings)
             .WithTrackingName("MiyaJsonCodecInputs");
-        context.RegisterSourceOutput(
-            jsonCodecInputs,
-            static (productionContext, pair) =>
+        var jsonSources = jsonCodecInputs
+            .SelectMany(static (pair, _) =>
             {
-                var jsonAnalyses = pair.Left.Select(static candidate => candidate.Analysis).ToImmutableArray();
-                var result = MiyaGeneratorCore.GenerateFromAnalyses(
-                    jsonAnalyses,
-                    new GeneratorSettings(pair.Right.Naming, emitInterceptors: false));
-                AddSources(productionContext, result, "Miya.Json");
-            });
+                var jsonAnalyses = pair.Left
+                    .Select(static candidate => candidate.Analysis)
+                    .ToImmutableArray();
+                return MiyaGeneratorCore.GenerateIncrementalJsonSources(jsonAnalyses, pair.Right);
+            })
+            .WithComparer(GeneratedSourceComparer.Instance)
+            .WithTrackingName("MiyaJsonSources");
+        context.RegisterSourceOutput(
+            jsonSources,
+            static (productionContext, source) => AddSource(productionContext, source));
 
         var routes = analyses
             .Where(static analysis => analysis.Route is not null)
             .WithTrackingName("MiyaRoutes");
+        var routeSources = routes.Collect()
+            .SelectMany(static (routeAnalyses, _) =>
+                MiyaGeneratorCore.GenerateIncrementalRouteSources(routeAnalyses))
+            .WithComparer(GeneratedSourceComparer.Instance)
+            .WithTrackingName("MiyaRouteSources");
         context.RegisterSourceOutput(
-            routes.Collect(),
-            static (productionContext, routeAnalyses) =>
+            routeSources,
+            static (productionContext, source) => AddSource(productionContext, source));
+
+        var interceptorSources = analyses.Combine(settings)
+            .Select(static (pair, _) =>
+                MiyaGeneratorCore.GenerateIncrementalInterceptorSource(pair.Left, pair.Right))
+            .Where(static source => source is not null)
+            .Select(static (source, _) => source!)
+            .WithComparer(GeneratedSourceComparer.Instance)
+            .WithTrackingName("MiyaInterceptorSources");
+        context.RegisterSourceOutput(
+            interceptorSources,
+            static (productionContext, source) => AddSource(productionContext, source));
+
+        var callSiteDiagnostics = analyses.Combine(settings)
+            .Select(static (pair, _) =>
+                MiyaGeneratorCore.GenerateCallSiteDiagnostics(pair.Left, pair.Right))
+            .WithTrackingName("MiyaCallSiteDiagnostics");
+        context.RegisterSourceOutput(
+            callSiteDiagnostics,
+            static (productionContext, diagnostics) =>
             {
-                var result = MiyaGeneratorCore.GenerateFromAnalyses(
-                    routeAnalyses,
-                    new GeneratorSettings(emitInterceptors: false));
-                AddSources(productionContext, result, "Miya.RouteTemplates");
+                foreach (var diagnostic in diagnostics)
+                {
+                    productionContext.ReportDiagnostic(diagnostic);
+                }
             });
 
+        var duplicateRouteDiagnostics = routes.Collect()
+            .Select(static (routeAnalyses, _) =>
+                MiyaGeneratorCore.GenerateDuplicateRouteDiagnostics(routeAnalyses))
+            .WithTrackingName("MiyaDuplicateRouteDiagnostics");
         context.RegisterSourceOutput(
-            analyses.Collect().Combine(settings),
+            duplicateRouteDiagnostics,
             static (productionContext, pair) =>
             {
-                var result = MiyaGeneratorCore.GenerateFromAnalyses(pair.Left, pair.Right);
-                AddSources(productionContext, result, "Miya.Interceptors");
-                foreach (var diagnostic in result.Diagnostics)
+                foreach (var diagnostic in pair)
                 {
                     productionContext.ReportDiagnostic(diagnostic);
                 }
@@ -84,17 +120,8 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
         return new GeneratorSettings(MiyaJsonNaming.CamelCase, emitInterceptors: true);
     }
 
-    private static void AddSources(
-        SourceProductionContext context,
-        GenerationResult result,
-        string hintPrefix)
+    private static void AddSource(SourceProductionContext context, GeneratedSource source)
     {
-        foreach (var source in result.Sources)
-        {
-            if (source.HintName.StartsWith(hintPrefix, StringComparison.Ordinal))
-            {
-                context.AddSource(source.HintName, SourceText.From(source.Source, System.Text.Encoding.UTF8));
-            }
-        }
+        context.AddSource(source.HintName, SourceText.From(source.Source, System.Text.Encoding.UTF8));
     }
 }

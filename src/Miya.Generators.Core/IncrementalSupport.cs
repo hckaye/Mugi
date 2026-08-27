@@ -61,3 +61,25 @@ internal sealed class JsonInvocationCandidateComparer : IEqualityComparer<JsonIn
 
     public int GetHashCode(JsonInvocationCandidate obj) => StringComparer.Ordinal.GetHashCode(obj.ShapeKey);
 }
+
+internal sealed class GeneratedSourceComparer : IEqualityComparer<GeneratedSource>
+{
+    internal static readonly GeneratedSourceComparer Instance = new();
+
+    public bool Equals(GeneratedSource? x, GeneratedSource? y)
+    {
+        return ReferenceEquals(x, y)
+            || (x is not null && y is not null
+                && string.Equals(x.HintName, y.HintName, StringComparison.Ordinal)
+                && string.Equals(x.Source, y.Source, StringComparison.Ordinal));
+    }
+
+    public int GetHashCode(GeneratedSource obj)
+    {
+        unchecked
+        {
+            return (StringComparer.Ordinal.GetHashCode(obj.HintName) * 397)
+                ^ StringComparer.Ordinal.GetHashCode(obj.Source);
+        }
+    }
+}

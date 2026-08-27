@@ -1,8 +1,10 @@
 using System;
+using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace Miya.Generators.Core;
 
@@ -109,8 +111,27 @@ internal static class InvocationAnalyzer
         if (containingName == "Miya.Json.MiyaJson"
             && (method.Name == "Include" || method.Name == "Serialize" || method.Name == "Deserialize"))
         {
+            if (method.Name != "Include" && HasExplicitCodecParameter(method))
+            {
+                return false;
+            }
+
             jsonType = NormalizeTopLevelNullability(method.TypeArguments[0]);
             return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasExplicitCodecParameter(IMethodSymbol method)
+    {
+        foreach (var parameter in method.Parameters)
+        {
+            if (parameter.Type is INamedTypeSymbol named
+                && GetMetadataName(named.OriginalDefinition) == "Miya.Json.IMiyaJsonCodec`1")
+            {
+                return true;
+            }
         }
 
         return false;
@@ -140,13 +161,23 @@ internal static class InvocationAnalyzer
             return false;
         }
 
-        var patternArgumentIndex = method.Name == "On" ? 1 : 0;
-        if (!IsRouteMethod(method.Name) || invocation.ArgumentList.Arguments.Count <= patternArgumentIndex)
+        if (!IsRouteMethod(method.Name))
         {
             return false;
         }
 
-        var patternExpression = invocation.ArgumentList.Arguments[patternArgumentIndex].Expression;
+        var patternParameter = method.Parameters.FirstOrDefault(static parameter => parameter.Name == "pattern");
+        if (patternParameter is null
+            || !TryGetArgumentExpression(
+                semanticModel,
+                invocation,
+                patternParameter.Ordinal,
+                cancellationToken,
+                out var patternExpression))
+        {
+            return false;
+        }
+
         if (!(patternExpression is LiteralExpressionSyntax literal)
             || !literal.IsKind(SyntaxKind.StringLiteralExpression))
         {
@@ -164,7 +195,7 @@ internal static class InvocationAnalyzer
             return false;
         }
 
-        var routeMethod = GetRouteMethod(invocation, method);
+        var routeMethod = GetRouteMethod(semanticModel, invocation, method, cancellationToken);
         var receiverSymbol = GetReceiverSymbol(semanticModel, invocation, cancellationToken);
         string? interceptAttribute = null;
         if (includeInterceptLocation)
@@ -200,7 +231,11 @@ internal static class InvocationAnalyzer
         return semanticModel.GetSymbolInfo(memberAccess.Expression, cancellationToken).Symbol;
     }
 
-    private static string GetRouteMethod(InvocationExpressionSyntax invocation, IMethodSymbol method)
+    private static string GetRouteMethod(
+        SemanticModel semanticModel,
+        InvocationExpressionSyntax invocation,
+        IMethodSymbol method,
+        CancellationToken cancellationToken)
     {
         if (method.Name == "All")
         {
@@ -212,9 +247,15 @@ internal static class InvocationAnalyzer
             return method.Name.ToUpperInvariant();
         }
 
-        if (invocation.ArgumentList.Arguments.Count > 0)
+        var methodParameter = method.Parameters.FirstOrDefault(static parameter => parameter.Name == "method");
+        if (methodParameter is not null
+            && TryGetArgumentExpression(
+                semanticModel,
+                invocation,
+                methodParameter.Ordinal,
+                cancellationToken,
+                out var expression))
         {
-            var expression = invocation.ArgumentList.Arguments[0].Expression;
             if (expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
                 return literal.Token.ValueText.ToUpperInvariant();
@@ -222,6 +263,30 @@ internal static class InvocationAnalyzer
         }
 
         return "<dynamic>";
+    }
+
+    private static bool TryGetArgumentExpression(
+        SemanticModel semanticModel,
+        InvocationExpressionSyntax invocation,
+        int parameterOrdinal,
+        CancellationToken cancellationToken,
+        out ExpressionSyntax expression)
+    {
+        if (semanticModel.GetOperation(invocation, cancellationToken) is IInvocationOperation operation)
+        {
+            foreach (var argument in operation.Arguments)
+            {
+                if (argument.Parameter?.Ordinal == parameterOrdinal
+                    && argument.Syntax is ArgumentSyntax argumentSyntax)
+                {
+                    expression = argumentSyntax.Expression;
+                    return true;
+                }
+            }
+        }
+
+        expression = null!;
+        return false;
     }
 
     private static bool IsRouteMethod(string name)

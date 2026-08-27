@@ -63,6 +63,139 @@ public static class MiyaGeneratorCore
 
         AddDuplicateRouteDiagnostics(analyses, diagnostics);
 
+        var orderedModels = BuildJsonModels(analyses, settings, diagnostics);
+        var models = new Dictionary<ITypeSymbol, JsonTypeModel>(SymbolEqualityComparer.Default);
+        foreach (var model in orderedModels)
+        {
+            models[model.Type] = model;
+        }
+        var routes = analyses
+            .Where(static analysis => analysis.Route is not null)
+            .Select(static analysis => analysis.Route!)
+            .ToImmutableArray();
+
+        var sources = ImmutableArray.CreateBuilder<GeneratedSource>();
+        if (orderedModels.Length != 0)
+        {
+            var jsonEmitter = new JsonSourceEmitter(orderedModels, settings);
+            sources.Add(new GeneratedSource("Miya.JsonCodecs.g.cs", jsonEmitter.EmitCodecs()));
+            sources.Add(new GeneratedSource("Miya.JsonRegistration.g.cs", jsonEmitter.EmitRegistration()));
+        }
+
+        if (routes.Length != 0)
+        {
+            sources.Add(new GeneratedSource(
+                "Miya.RouteTemplates.g.cs",
+                RouteAndInterceptorEmitter.EmitRouteTemplates(routes)));
+        }
+
+        if (settings.EmitInterceptors && HasInterceptor(analyses, models))
+        {
+            sources.Add(new GeneratedSource(
+                "Miya.Interceptors.g.cs",
+                RouteAndInterceptorEmitter.EmitInterceptors(analyses, orderedModels)));
+        }
+
+        return new GenerationResult(sources.ToImmutable(), diagnostics.ToImmutable());
+    }
+
+    internal static ImmutableArray<GeneratedSource> GenerateIncrementalJsonSources(
+        ImmutableArray<InvocationAnalysis> analyses,
+        GeneratorSettings settings)
+    {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var models = BuildJsonModels(analyses, settings, diagnostics);
+        var sources = ImmutableArray.CreateBuilder<GeneratedSource>(models.Length);
+        foreach (var model in models)
+        {
+            var emitter = new JsonSourceEmitter(ImmutableArray.Create(model), settings);
+            var key = TypeNames.CodecName(model.Type);
+            sources.Add(new GeneratedSource(
+                "Miya.JsonCodec." + key + ".g.cs",
+                emitter.EmitCodecAndRegistrationSource(model)));
+        }
+
+        return sources.ToImmutable();
+    }
+
+    internal static ImmutableArray<GeneratedSource> GenerateIncrementalRouteSources(
+        ImmutableArray<InvocationAnalysis> analyses)
+    {
+        var sources = ImmutableArray.CreateBuilder<GeneratedSource>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var route in analyses
+                     .Where(static analysis => analysis.Route is not null)
+                     .Select(static analysis => analysis.Route!))
+        {
+            if (!seen.Add(route.Pattern))
+            {
+                continue;
+            }
+
+            var key = RouteAndInterceptorEmitter.RouteFieldName(route.Pattern);
+            sources.Add(new GeneratedSource(
+                "Miya.RouteTemplate." + key + ".g.cs",
+                RouteAndInterceptorEmitter.EmitRouteTemplate(route)));
+        }
+
+        return sources.ToImmutable();
+    }
+
+    internal static GeneratedSource? GenerateIncrementalInterceptorSource(
+        InvocationAnalysis analysis,
+        GeneratorSettings settings)
+    {
+        if (analysis.Route?.InterceptAttribute is not null)
+        {
+            var key = RouteAndInterceptorEmitter.InterceptorKey(analysis);
+            return new GeneratedSource(
+                "Miya.Interceptor." + key + ".g.cs",
+                RouteAndInterceptorEmitter.EmitInterceptor(analysis, model: null));
+        }
+
+        if (!analysis.InterceptJson || analysis.JsonInterceptAttribute is null || analysis.JsonType is null)
+        {
+            return null;
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var models = BuildJsonModels(ImmutableArray.Create(analysis), settings, diagnostics);
+        var model = models.FirstOrDefault(candidate =>
+            SymbolEqualityComparer.Default.Equals(candidate.Type, analysis.JsonType));
+        if (model is null)
+        {
+            return null;
+        }
+
+        var interceptorKey = RouteAndInterceptorEmitter.InterceptorKey(analysis);
+        return new GeneratedSource(
+            "Miya.Interceptor." + interceptorKey + ".g.cs",
+            RouteAndInterceptorEmitter.EmitInterceptor(analysis, model));
+    }
+
+    internal static ImmutableArray<Diagnostic> GenerateCallSiteDiagnostics(
+        InvocationAnalysis analysis,
+        GeneratorSettings settings)
+    {
+        var result = GenerateFromAnalyses(
+            ImmutableArray.Create(analysis),
+            new GeneratorSettings(settings.Naming, emitInterceptors: false));
+        return result.Diagnostics;
+    }
+
+    internal static ImmutableArray<Diagnostic> GenerateDuplicateRouteDiagnostics(
+        ImmutableArray<InvocationAnalysis> analyses)
+    {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        AddDuplicateRouteDiagnostics(analyses, diagnostics);
+        return diagnostics.ToImmutable();
+    }
+
+    private static ImmutableArray<JsonTypeModel> BuildJsonModels(
+        ImmutableArray<InvocationAnalysis> analyses,
+        GeneratorSettings settings,
+        ImmutableArray<Diagnostic>.Builder diagnostics)
+    {
         var models = new Dictionary<ITypeSymbol, JsonTypeModel>(SymbolEqualityComparer.Default);
         foreach (var analysis in analyses)
         {
@@ -97,37 +230,9 @@ public static class MiyaGeneratorCore
             }
         }
 
-        var orderedModels = models.Values
+        return models.Values
             .OrderBy(static model => TypeNames.Key(model.Type), StringComparer.Ordinal)
             .ToImmutableArray();
-        var routes = analyses
-            .Where(static analysis => analysis.Route is not null)
-            .Select(static analysis => analysis.Route!)
-            .ToImmutableArray();
-
-        var sources = ImmutableArray.CreateBuilder<GeneratedSource>();
-        if (orderedModels.Length != 0)
-        {
-            var jsonEmitter = new JsonSourceEmitter(orderedModels, settings);
-            sources.Add(new GeneratedSource("Miya.JsonCodecs.g.cs", jsonEmitter.EmitCodecs()));
-            sources.Add(new GeneratedSource("Miya.JsonRegistration.g.cs", jsonEmitter.EmitRegistration()));
-        }
-
-        if (routes.Length != 0)
-        {
-            sources.Add(new GeneratedSource(
-                "Miya.RouteTemplates.g.cs",
-                RouteAndInterceptorEmitter.EmitRouteTemplates(routes)));
-        }
-
-        if (settings.EmitInterceptors && HasInterceptor(analyses, models))
-        {
-            sources.Add(new GeneratedSource(
-                "Miya.Interceptors.g.cs",
-                RouteAndInterceptorEmitter.EmitInterceptors(analyses, orderedModels, routes)));
-        }
-
-        return new GenerationResult(sources.ToImmutable(), diagnostics.ToImmutable());
     }
 
     private static bool HasInterceptor(
@@ -183,23 +288,26 @@ public static class MiyaGeneratorCore
         ImmutableArray<InvocationAnalysis> analyses,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
-        var previous = new List<RouteCall>();
+        var previous = new List<InvocationAnalysis>();
         foreach (var analysis in analyses
                      .Where(static item => item.Route is not null)
                      .OrderBy(static item => item.Syntax.SyntaxTree.FilePath, StringComparer.Ordinal)
                      .ThenBy(static item => item.Syntax.SpanStart))
         {
             var route = analysis.Route!;
-            if (!(route.ReceiverSymbol is ILocalSymbol local) || route.Method == "<dynamic>")
+            var block = GetDirectContainingBlock(analysis.Syntax);
+            if (!(route.ReceiverSymbol is ILocalSymbol local) || route.Method == "<dynamic>" || block is null)
             {
                 continue;
             }
 
             var duplicate = previous.FirstOrDefault(candidate =>
-                candidate.ReceiverSymbol is ILocalSymbol
-                && SymbolEqualityComparer.Default.Equals(candidate.ReceiverSymbol, route.ReceiverSymbol)
-                && string.Equals(candidate.Method, route.Method, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(candidate.Pattern, route.Pattern, StringComparison.Ordinal));
+                candidate.Route is not null
+                && IsSameBlock(GetDirectContainingBlock(candidate.Syntax), block)
+                && candidate.Route.ReceiverSymbol is ILocalSymbol
+                && SymbolEqualityComparer.Default.Equals(candidate.Route.ReceiverSymbol, route.ReceiverSymbol)
+                && string.Equals(candidate.Route.Method, route.Method, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.Route.Pattern, route.Pattern, StringComparison.Ordinal));
             if (duplicate is not null)
             {
                 diagnostics.Add(Diagnostic.Create(
@@ -211,8 +319,24 @@ public static class MiyaGeneratorCore
             }
             else
             {
-                previous.Add(route);
+                previous.Add(analysis);
             }
         }
+    }
+
+    private static Microsoft.CodeAnalysis.CSharp.Syntax.BlockSyntax? GetDirectContainingBlock(
+        Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax invocation)
+    {
+        var statement = invocation.FirstAncestorOrSelf<Microsoft.CodeAnalysis.CSharp.Syntax.StatementSyntax>();
+        return statement?.Parent as Microsoft.CodeAnalysis.CSharp.Syntax.BlockSyntax;
+    }
+
+    private static bool IsSameBlock(
+        Microsoft.CodeAnalysis.CSharp.Syntax.BlockSyntax? left,
+        Microsoft.CodeAnalysis.CSharp.Syntax.BlockSyntax right)
+    {
+        return left is not null
+            && ReferenceEquals(left.SyntaxTree, right.SyntaxTree)
+            && left.Span == right.Span;
     }
 }

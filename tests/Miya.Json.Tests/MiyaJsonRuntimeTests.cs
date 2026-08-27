@@ -104,14 +104,42 @@ public sealed class MiyaJsonRuntimeTests
     }
 
     [Fact]
-    public void CancellationIsCheckedWhileParsingCollections()
+    public void CancellationIsCheckedWhileParsingCollectionsAndLongScans()
     {
         using var source = new CancellationTokenSource();
         source.Cancel();
-        var options = new MiyaJsonOptions { CancellationToken = source.Token };
+        var options = new MiyaJsonOptions
+        {
+            CancellationToken = source.Token,
+            MaxDepth = 512,
+            MaxNumberDigits = 32 * 1024,
+        };
+
+        var collection = Encoding.UTF8.GetBytes("[" + string.Join(',', Enumerable.Repeat("1", 10_000)) + "]");
+        var deep = Encoding.UTF8.GetBytes(new string('[', 256) + "null" + new string(']', 256));
+        var whitespace = Encoding.UTF8.GetBytes(new string(' ', 32 * 1024) + "null");
+        var number = Encoding.UTF8.GetBytes(new string('1', 32 * 1024));
 
         Assert.Throws<OperationCanceledException>(() =>
-            MiyaJson.Deserialize("[1]"u8, SkipCodec.Instance, options));
+            MiyaJson.Deserialize(collection, SkipCodec.Instance, options));
+        Assert.Throws<OperationCanceledException>(() =>
+            MiyaJson.Deserialize(deep, SkipCodec.Instance, options));
+        Assert.Throws<OperationCanceledException>(() =>
+            MiyaJson.Deserialize(whitespace, SkipCodec.Instance, options));
+        Assert.Throws<OperationCanceledException>(() =>
+            MiyaJson.Deserialize(number, SkipCodec.Instance, options));
+    }
+
+    [Fact]
+    public void ExceptionClassificationDistinguishesInputFromCodecConfigurationErrors()
+    {
+        var input = Assert.Throws<MiyaJsonException>(() =>
+            MiyaJson.Deserialize("[1,]"u8, SkipCodec.Instance));
+        var configuration = Assert.Throws<MiyaJsonException>(() =>
+            MiyaJson.GetCodec<UnregisteredType>());
+
+        Assert.True(input.IsInputError);
+        Assert.False(configuration.IsInputError);
     }
 
     [Fact]
@@ -331,4 +359,8 @@ public sealed class MiyaJsonRuntimeTests
         Assert.Equal(expected.Node?.Value, actual.Node?.Value);
         Assert.Equal(expected.Node?.Next?.Value, actual.Node?.Next?.Value);
     }
+}
+
+internal sealed class UnregisteredType
+{
 }

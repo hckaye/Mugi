@@ -26,6 +26,26 @@ internal static class GeneratedNaming
         return SyntaxFacts.GetKeywordKind(value) == SyntaxKind.None ? value : "@" + value;
     }
 
+    internal static string StableIdentifier(string prefix, string value)
+    {
+        var builder = new StringBuilder(prefix);
+        foreach (var character in value)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+            else
+            {
+                builder.Append('_');
+                builder.Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
+                builder.Append('_');
+            }
+        }
+
+        return builder.ToString();
+    }
+
     internal static string JsonMemberPrefix(string jsonName, bool first)
     {
         var builder = new StringBuilder();

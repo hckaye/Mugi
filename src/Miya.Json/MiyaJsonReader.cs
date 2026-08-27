@@ -30,7 +30,8 @@ public ref struct MiyaJsonReader
         if (utf8Json.Length > options.MaxDocumentByteLength)
         {
             throw new MiyaJsonException(
-                $"The JSON document exceeds the {options.MaxDocumentByteLength}-byte limit.");
+                $"The JSON document exceeds the {options.MaxDocumentByteLength}-byte limit.",
+                isInputError: true);
         }
 
         _source = utf8Json;
@@ -183,7 +184,10 @@ public ref struct MiyaJsonReader
         }
         catch (DecoderFallbackException exception)
         {
-            throw new MiyaJsonException($"Invalid UTF-8 at byte offset {_position}.", exception);
+            throw new MiyaJsonException(
+                $"Invalid UTF-8 at byte offset {_position}.",
+                exception,
+                isInputError: true);
         }
     }
 
@@ -542,6 +546,7 @@ public ref struct MiyaJsonReader
     private ReadOnlySpan<byte> ReadNumberToken()
     {
         SkipWhitespace();
+        _options.CancellationToken.ThrowIfCancellationRequested();
         BeginValue();
         var start = _position;
         var digits = 0;
@@ -701,6 +706,7 @@ public ref struct MiyaJsonReader
 
     private bool TryReadEndContainer(ContainerKind kind, byte terminator)
     {
+        _options.CancellationToken.ThrowIfCancellationRequested();
         var frame = RequireContainer(kind);
         SkipWhitespace();
 
@@ -875,8 +881,14 @@ public ref struct MiyaJsonReader
 
     private void SkipWhitespace()
     {
+        var start = _position;
         while (_position < _source.Length && _source[_position] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
         {
+            if (((_position - start) & 0x3FFF) == 0)
+            {
+                _options.CancellationToken.ThrowIfCancellationRequested();
+            }
+
             _position++;
         }
     }
@@ -917,6 +929,11 @@ public ref struct MiyaJsonReader
     private void CountDigit(ref int digits)
     {
         digits++;
+        if ((digits & 0x3FFF) == 0)
+        {
+            _options.CancellationToken.ThrowIfCancellationRequested();
+        }
+
         if (digits > _options.MaxNumberDigits)
         {
             throw Error($"The number exceeds the {_options.MaxNumberDigits}-digit limit");
@@ -956,7 +973,7 @@ public ref struct MiyaJsonReader
     }
 
     private MiyaJsonException Error(string message) =>
-        new($"{message} at byte offset {_position}.");
+        new($"{message} at byte offset {_position}.", isInputError: true);
 
     private static void ValidateOptions(MiyaJsonOptions options)
     {

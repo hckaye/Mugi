@@ -9,18 +9,12 @@ namespace Miya.Generators.Core;
 internal sealed class JsonSourceEmitter
 {
     private readonly ImmutableArray<JsonTypeModel> _models;
-    private readonly Dictionary<ITypeSymbol, JsonTypeModel> _modelByType;
     private readonly GeneratorSettings _settings;
 
     internal JsonSourceEmitter(ImmutableArray<JsonTypeModel> models, GeneratorSettings settings)
     {
         _models = models;
         _settings = settings;
-        _modelByType = new Dictionary<ITypeSymbol, JsonTypeModel>(SymbolEqualityComparer.Default);
-        foreach (var model in models)
-        {
-            _modelByType[model.Type] = model;
-        }
     }
 
     internal string EmitCodecs()
@@ -32,6 +26,15 @@ internal sealed class JsonSourceEmitter
             writer.Line();
         }
 
+        return writer.ToString();
+    }
+
+    internal string EmitCodecAndRegistrationSource(JsonTypeModel model)
+    {
+        var writer = StartFile();
+        EmitCodec(writer, model);
+        writer.Line();
+        EmitRegistration(writer, model);
         return writer.ToString();
     }
 
@@ -51,6 +54,19 @@ internal sealed class JsonSourceEmitter
         writer.Close();
         writer.Close();
         return writer.ToString();
+    }
+
+    private static void EmitRegistration(CodeWriter writer, JsonTypeModel model)
+    {
+        var codecName = TypeNames.CodecName(model.Type);
+        writer.Open("internal static class MiyaJsonGeneratedRegistration_" + codecName);
+        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
+        writer.Open("internal static void Initialize()");
+        writer.Line(
+            "global::Miya.Json.MiyaJson.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
+            codecName + ".Instance);");
+        writer.Close();
+        writer.Close();
     }
 
     private static CodeWriter StartFile()
@@ -73,11 +89,6 @@ internal sealed class JsonSourceEmitter
             "internal sealed class " + codecName +
             " : global::Miya.Json.IMiyaJsonCodec<" + typeName + ">");
         writer.Line("internal static readonly " + codecName + " Instance = new " + codecName + "();");
-        if (IsStructural(model.Kind))
-        {
-            writer.Line("private const int MaxDepth = 64;");
-        }
-
         writer.Line();
         writer.Line(
             "public void Write(ref global::Miya.Json.MiyaJsonWriter writer, " + valueTypeName +
@@ -97,16 +108,6 @@ internal sealed class JsonSourceEmitter
             " ReadValue(ref global::Miya.Json.MiyaJsonReader reader, int depth)");
         EmitReadBody(writer, model);
         writer.Close();
-
-        if (IsStructural(model.Kind))
-        {
-            writer.Line();
-            writer.Open("private static void GuardDepth(int depth)");
-            writer.Open("if (depth >= MaxDepth)");
-            writer.Line("throw new global::Miya.Json.MiyaJsonException(\"The generated codec exceeded the maximum depth of 64.\");");
-            writer.Close();
-            writer.Close();
-        }
 
         writer.Close();
     }
@@ -176,7 +177,8 @@ internal sealed class JsonSourceEmitter
     private void EmitWriteSequence(CodeWriter writer, JsonTypeModel model)
     {
         EmitNullWrite(writer);
-        writer.Line("GuardDepth(depth);");
+        writer.Line("writer.EnterContainer(" +
+            (model.Kind == JsonTypeKind.Array ? "value.Length" : "value.Count") + ");");
         writer.Line("writer.WriteRaw(\"[\"u8);");
         writer.Line("var index = 0;");
         writer.Open("foreach (var item in value)");
@@ -186,12 +188,13 @@ internal sealed class JsonSourceEmitter
         writer.Line(WriteCall(model.ElementType!, "item", "depth + 1"));
         writer.Close();
         writer.Line("writer.WriteRaw(\"]\"u8);");
+        writer.Line("writer.ExitContainer();");
     }
 
     private void EmitWriteDictionary(CodeWriter writer, JsonTypeModel model)
     {
         EmitNullWrite(writer);
-        writer.Line("GuardDepth(depth);");
+        writer.Line("writer.EnterContainer(value.Count);");
         writer.Line("writer.WriteRaw(\"{\"u8);");
         writer.Line("var index = 0;");
         writer.Open("foreach (var pair in value)");
@@ -203,6 +206,7 @@ internal sealed class JsonSourceEmitter
         writer.Line(WriteCall(model.DictionaryValueType!, "pair.Value", "depth + 1"));
         writer.Close();
         writer.Line("writer.WriteRaw(\"}\"u8);");
+        writer.Line("writer.ExitContainer();");
     }
 
     private void EmitWriteObject(CodeWriter writer, JsonTypeModel model)
@@ -212,10 +216,11 @@ internal sealed class JsonSourceEmitter
             EmitNullWrite(writer);
         }
 
-        writer.Line("GuardDepth(depth);");
+        writer.Line("writer.EnterContainer(" + model.Properties.Length + ");");
         if (model.Properties.Length == 0)
         {
             writer.Line("writer.WriteRaw(\"{}\"u8);");
+            writer.Line("writer.ExitContainer();");
             return;
         }
 
@@ -232,6 +237,7 @@ internal sealed class JsonSourceEmitter
         }
 
         writer.Line("writer.WriteRaw(\"}\"u8);");
+        writer.Line("writer.ExitContainer();");
     }
 
     private void EmitReadBody(CodeWriter writer, JsonTypeModel model)
@@ -242,16 +248,16 @@ internal sealed class JsonSourceEmitter
                 writer.Line("return reader.ReadBool();");
                 return;
             case JsonTypeKind.Byte:
-                writer.Line("return checked((byte)reader.ReadInt32());");
+                EmitCheckedIntegerRead(writer, "byte", "Byte");
                 return;
             case JsonTypeKind.SByte:
-                writer.Line("return checked((sbyte)reader.ReadInt32());");
+                EmitCheckedIntegerRead(writer, "sbyte", "SByte");
                 return;
             case JsonTypeKind.Int16:
-                writer.Line("return checked((short)reader.ReadInt32());");
+                EmitCheckedIntegerRead(writer, "short", "Int16");
                 return;
             case JsonTypeKind.UInt16:
-                writer.Line("return checked((ushort)reader.ReadInt32());");
+                EmitCheckedIntegerRead(writer, "ushort", "UInt16");
                 return;
             case JsonTypeKind.Int32:
                 writer.Line("return reader.ReadInt32();");
@@ -277,7 +283,7 @@ internal sealed class JsonSourceEmitter
             case JsonTypeKind.Char:
                 writer.Line("var text = reader.ReadString();");
                 writer.Open("if (text is null || text.Length != 1)");
-                writer.Line("throw new global::Miya.Json.MiyaJsonException(\"Expected a single JSON character.\");");
+                writer.Line("throw new global::Miya.Json.MiyaJsonException(\"Expected a single JSON character.\", isInputError: true);");
                 writer.Close();
                 writer.Line("return text[0];");
                 return;
@@ -320,7 +326,6 @@ internal sealed class JsonSourceEmitter
     private void EmitReadSequence(CodeWriter writer, JsonTypeModel model)
     {
         EmitNullRead(writer);
-        writer.Line("GuardDepth(depth);");
         var listType = "global::System.Collections.Generic.List<" + TypeNames.Display(model.ElementType!) + ">";
         writer.Line("var result = new " + listType + "();");
         writer.Line("reader.ReadBeginArray();");
@@ -333,7 +338,6 @@ internal sealed class JsonSourceEmitter
     private void EmitReadDictionary(CodeWriter writer, JsonTypeModel model)
     {
         EmitNullRead(writer);
-        writer.Line("GuardDepth(depth);");
         var typeName = TypeNames.NonNullableDisplay(model.Type);
         writer.Line("var result = new " + typeName + "(global::System.StringComparer.Ordinal);");
         writer.Line("reader.ReadBeginObject();");
@@ -352,7 +356,6 @@ internal sealed class JsonSourceEmitter
             EmitNullRead(writer);
         }
 
-        writer.Line("GuardDepth(depth);");
         for (var index = 0; index < model.Properties.Length; index++)
         {
             writer.Line(TypeNames.Display(model.Properties[index].Property.Type) + " property" + index + " = default!;");
@@ -394,7 +397,8 @@ internal sealed class JsonSourceEmitter
                         && item.Model.Property.NullableAnnotation == NullableAnnotation.NotAnnotated)
                     {
                         read += " ?? throw new global::Miya.Json.MiyaJsonException(" +
-                            GeneratedNaming.Literal("Property '" + item.JsonName + "' cannot be null.") + ")";
+                            GeneratedNaming.Literal("Property '" + item.JsonName + "' cannot be null.") +
+                            ", isInputError: true)";
                     }
 
                     writer.Line("property" + item.Index + " = " + read + ";");
@@ -430,7 +434,8 @@ internal sealed class JsonSourceEmitter
             writer.Open("if (" + string.Join(" || ", required.Select(static item => "!hasProperty" + item.Index)) + ")");
             writer.Line(
                 "throw new global::Miya.Json.MiyaJsonException(" +
-                GeneratedNaming.Literal("One or more required properties are missing for '" + TypeNames.Display(model.Type) + "'.") + ");");
+                GeneratedNaming.Literal("One or more required properties are missing for '" + TypeNames.Display(model.Type) + "'.") +
+                ", isInputError: true);");
             writer.Close();
         }
 
@@ -452,12 +457,17 @@ internal sealed class JsonSourceEmitter
         writer.Close();
     }
 
-    private static bool IsStructural(JsonTypeKind kind)
+    private static void EmitCheckedIntegerRead(CodeWriter writer, string targetType, string typeName)
     {
-        return kind == JsonTypeKind.Array
-            || kind == JsonTypeKind.List
-            || kind == JsonTypeKind.Dictionary
-            || kind == JsonTypeKind.Object;
+        writer.Open("try");
+        writer.Line("return checked((" + targetType + ")reader.ReadInt32());");
+        writer.Close();
+        writer.Open("catch (global::System.OverflowException exception)");
+        writer.Line(
+            "throw new global::Miya.Json.MiyaJsonException(" +
+            GeneratedNaming.Literal("The JSON number is outside the " + typeName + " range.") +
+            ", exception, isInputError: true);");
+        writer.Close();
     }
 
     private void EmitObjectConstruction(CodeWriter writer, JsonTypeModel model)
@@ -511,12 +521,7 @@ internal sealed class JsonSourceEmitter
 
     private string CodecName(ITypeSymbol type)
     {
-        if (!_modelByType.TryGetValue(type, out var model))
-        {
-            throw new InvalidOperationException("A JSON dependency type was not included in the graph.");
-        }
-
-        return TypeNames.CodecName(model.Type);
+        return TypeNames.CodecName(type);
     }
 
     private static string NullableContractType(ITypeSymbol type)

@@ -27,9 +27,9 @@ public sealed class InterceptorTests
         Assert.Empty(errors);
         Assert.Contains(
             "[global::System.Runtime.CompilerServices.InterceptsLocationAttribute(",
-            run.Source("Miya.Interceptors.g.cs"),
+            run.SourcesWithPrefix("Miya.Interceptor."),
             StringComparison.Ordinal);
-        Assert.Contains("RouteTemplates.Route_0", run.Source("Miya.Interceptors.g.cs"), StringComparison.Ordinal);
+        Assert.Contains("RouteTemplates.Route_", run.SourcesWithPrefix("Miya.Interceptor."), StringComparison.Ordinal);
 
         var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
         var calls = assembly.GetType("Calls")!;
@@ -63,7 +63,7 @@ public sealed class InterceptorTests
             .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .ToArray();
         Assert.Empty(errors);
-        var generated = run.Source("Miya.Interceptors.g.cs");
+        var generated = run.SourcesWithPrefix("Miya.Interceptor.");
         Assert.Contains("this global::Miya.Context receiver", generated, StringComparison.Ordinal);
         Assert.Contains("this global::Miya.App<global::MyContext> receiver", generated, StringComparison.Ordinal);
     }
@@ -90,10 +90,70 @@ public sealed class InterceptorTests
             .ToArray();
         Assert.Empty(errors);
 
-        var codecs = run.Source("Miya.JsonCodecs.g.cs");
+        var codecs = run.SourcesWithPrefix("Miya.JsonCodec.");
         Assert.Equal(1, CountOccurrences(codecs, "sealed class Codec_global_003A__003A_Payload"));
         Assert.DoesNotContain("_003F_", codecs, StringComparison.Ordinal);
-        Assert.Contains(".Json<global::Payload>(value!", run.Source("Miya.Interceptors.g.cs"), StringComparison.Ordinal);
+        Assert.Contains(".Json<global::Payload>(value!", run.SourcesWithPrefix("Miya.Interceptor."), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Intercepted_json_call_uses_the_last_registered_codec()
+    {
+        const string source = """
+            using System;
+            using System.IO;
+            using System.Reflection;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.Features;
+            using Miya;
+            using Miya.Json;
+
+            public sealed record Payload(int Id);
+            public sealed class CustomCodec : IMiyaJsonCodec<Payload>
+            {
+                public static readonly CustomCodec Instance = new();
+                public void Write(ref MiyaJsonWriter writer, Payload? value) =>
+                    writer.WriteRaw("{\"custom\":true}"u8);
+                public Payload? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
+            }
+            public static class Runner
+            {
+                public static async Task<string> Run()
+                {
+                    MiyaJson.Register<Payload>(CustomCodec.Instance);
+                    var stream = new MemoryStream();
+                    var features = new FeatureCollection();
+                    features.Set<IHttpRequestFeature>(new HttpRequestFeature { Method = "GET", Path = "/" });
+                    features.Set<IHttpResponseFeature>(new HttpResponseFeature());
+                    features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(stream));
+
+                    var context = new Context();
+                    typeof(Context).GetMethod("Initialize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(context, new object?[] { features, null });
+                    await context.Json(new Payload(7));
+                    var completion = (ValueTask)typeof(Context)
+                        .GetMethod("CompleteResponse", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(context, null)!;
+                    await completion;
+                    return Encoding.UTF8.GetString(stream.ToArray());
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.Empty(errors);
+        Assert.Contains("MiyaJson.ResolveCodec<global::Payload>", run.SourcesWithPrefix("Miya.Interceptor."), StringComparison.Ordinal);
+
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var task = Assert.IsType<Task<string>>(
+            assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
+
+        Assert.Equal("{\"custom\":true}", await task);
     }
 
     private static int CountOccurrences(string text, string value)

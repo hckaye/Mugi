@@ -144,4 +144,12 @@ internal sealed class GeneratorRun
         .Single(source => source.HintName == hintName)
         .SourceText
         .ToString();
+
+    internal string SourcesWithPrefix(string hintPrefix) => string.Join(
+        Environment.NewLine,
+        Result.Results
+            .SelectMany(static generatorResult => generatorResult.GeneratedSources)
+            .Where(source => source.HintName.StartsWith(hintPrefix, StringComparison.Ordinal))
+            .OrderBy(static source => source.HintName, StringComparer.Ordinal)
+            .Select(static source => source.SourceText.ToString()));
 }
