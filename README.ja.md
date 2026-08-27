@@ -2,17 +2,15 @@
 
 [English](README.md) | 日本語
 
-Miya は NativeAOT を前提に設計した .NET 10 向けの小さな HTTP フレームワークです。アプリケーションに `WebApplication`、Generic Host、DI コンテナは必要ありません。平文の HTTP/1.1 と HTTP/2 では Kestrel を直接構築し、TLS と HTTP/3 のときだけ Kestrel の組み込みサービス登録を内部で使います。実行時のリフレクション、アセンブリスキャン、実行時コード生成は行いません。ハンドラーは属性付きのコントローラーメソッドではなくラムダで書きます。
+Miya は高速でシンプルな .NET 10 向け HTTP フレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行い、`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
 
-ルートテンプレートと JSON codec はコンパイル時に生成します。ルーティングのジェネレーターはリテラルのパターンを検証し、解析済みのテンプレートを埋め込みます。v0 では照合そのものは共有のランタイムマッチャーが行います。生成された JSON codec は module initializer で自身を登録します。リクエストの API は `Text`、`Json`、`Param`、`Query` を持つコンテキストモデルです。ミドルウェアは選ばれたルートを包む onion 順で合成します。
-
-## 動作要件とプロジェクト設定
+Miya は NativeAOT のために作られています。実行時にリフレクション、アセンブリスキャン、実行時コード生成を一切使わないので、publish したアプリは数ミリ秒で起動し、小さな単一バイナリになります。ルーティングと JSON はソースジェネレーターがコンパイル時に用意します。ジェネレーターを自分で呼ぶことはなく、パッケージを参照するだけで動きます。
 
 Miya は `net10.0` を対象にします。以下の計測には .NET SDK 10.0.203 を使いました。
 
-### NuGet パッケージ参照
+## インストール
 
-ローカルで pack または publish したパッケージを使うアプリケーションは、ランタイムとジェネレーターの両方を参照します。
+ランタイムパッケージとジェネレーターパッケージを追加します。ジェネレーターはビルド中に動き、アプリのルーティングと JSON のコードを生成します。
 
 ```xml
 <PropertyGroup>
@@ -27,19 +25,11 @@ Miya は `net10.0` を対象にします。以下の計測には .NET SDK 10.0.2
 </ItemGroup>
 ```
 
-`Miya.Generators` パッケージには analyzer アセンブリと `buildTransitive` の props ファイルが入っています。props ファイルは analyzer と `Miya.Generated` インターセプター名前空間を追加します。パッケージがプロジェクト参照を経由して届く場合も同じです。上記の明示的な `InterceptorsNamespaces` プロパティは、パッケージ参照とソース参照を切り替えるときにも有効です。
+`InterceptorsNamespaces` の行は必須です。これによりジェネレーターは、認識できる呼び出しをより速い直接呼び出しに置き換えられます。`Miya.Generators` パッケージには、analyzer としてのジェネレーターと、この設定を自動で行う `buildTransitive` の props ファイルが入っています。パッケージが別のプロジェクト参照を経由して届く場合も同じです。
 
-### プロジェクト参照
-
-リポジトリ内のプロジェクトは `Miya.Generators` を analyzer としてコンパイラに渡します。
+リポジトリ内でプロジェクトを直接参照するときは、ジェネレーターを analyzer としてコンパイラに渡します。
 
 ```xml
-<PropertyGroup>
-  <TargetFramework>net10.0</TargetFramework>
-  <PublishAot>true</PublishAot>
-  <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
-</PropertyGroup>
-
 <ItemGroup>
   <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
   <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
@@ -48,95 +38,135 @@ Miya は `net10.0` を対象にします。以下の計測には .NET SDK 10.0.2
 </ItemGroup>
 ```
 
-`MiyaJsonNaming` は生成するプロパティ名の規約を選びます。既定は `camelCase` です。C# のプロパティ名の大文字小文字をそのまま使うには `<MiyaJsonNaming>PascalCase</MiyaJsonNaming>` を設定します。
-
 ## クイックスタート
 
 ```csharp
-using System.Diagnostics;
-using System.Globalization;
 using Miya;
 
 var app = new App();
 
-app.Use(static async (context, next) =>
-{
-    var stopwatch = Stopwatch.StartNew();
-    await next(context);
-    context.Header(
-        "Server-Timing",
-        $"app;dur={stopwatch.Elapsed.TotalMilliseconds.ToString("0.###", CultureInfo.InvariantCulture)}");
-});
-
-app.Get("/", static context => context.Text("Hello"));
-app.Get("/users/:id", static context => context.Json(new User(context.Param("id"))));
+app.Get("/", static c => c.Text("Hello"));
+app.Get("/users/:id", static c => c.Json(new User(c.Param("id"), "Ada")));
 
 app.Run();
 
-internal sealed record User(string Id);
+public sealed record User(string Id, string Name);
 ```
 
-既定のポートで起動します。
+起動してリクエストを送ります。
 
 ```sh
 dotnet run
 curl -i http://127.0.0.1:3000/users/42
 ```
 
-`PORT=8080 dotnet run` はプログラムを変えずに待受ポートを変えます。
+`GET /users/42` は `{"id":"42","name":"Ada"}` を返します。既定のポートは 3000 です。`PORT=8080 dotnet run` はコードを変えずに待受ポートを変えます。
 
-## 型付きコンテキスト
+## コンテキストオブジェクト
 
-`App<TContext>` は、文字列キーやキャストなしでアプリケーション固有のリクエスト状態を運びます。派生コンテキストはリクエストごとに新しく作られます。ただし `IPoolableContext` を実装した型はプールされます。プールされる派生コンテキストは `OnReturn()` で自分のフィールドを消す必要があります。
+すべてのハンドラーは 1 つのコンテキストを受け取ります。ここでは `c` と呼びます。届いたリクエストを読み、レスポンスを組み立てます。
+
+リクエストを読む:
+
+| 呼び出し | 返すもの |
+| --- | --- |
+| `c.Req.Method`、`c.Req.Path` | HTTP メソッドとパス |
+| `c.Param("id")` | ルートパラメータ（`:id` のセグメントなど） |
+| `c.Query("q")` | クエリ文字列の値、または null |
+| `c.Req.Header("X-User")` | リクエストヘッダー、または null |
+| `await c.Req.Text()` | リクエスト本文をテキストとして |
+| `await c.Req.Json<T>()` | リクエスト本文を `T` にパースして |
+
+レスポンスを書く:
+
+| 呼び出し | 効果 |
+| --- | --- |
+| `c.Text(string)` | `text/plain` の本文を書く |
+| `c.Json(value)` | `value` を JSON として書く |
+| `c.Html(string)` | `text/html` の本文を書く |
+| `c.Bytes(data, contentType)` | 生のバイト列を書く |
+| `c.Stream(contentType, write)` | コールバックでレスポンスをストリーミングする |
+| `c.Status(code)` | ステータスコードを設定する |
+| `c.Header(name, value)` | レスポンスヘッダーを設定する。`c.AppendHeader` は値を追加する |
+| `c.Redirect(location)` | リダイレクトを送る（既定は 302） |
+| `c.NotFound()` | 404 を送る |
+
+`c.Aborted` は、クライアントが切断したときに発火する `CancellationToken` です。レスポンスはハンドラーとミドルウェアが終わるまでバッファに保持されるので、本文を書いた後でもステータスやヘッダーを変えられます。ただしストリーミングが始まる前までです。
+
+## ルーティング
+
+HTTP メソッドとパスのパターンに対してハンドラーを登録します。パターンは、静的セグメント、1 セグメントの `:name`、残りのパスを受ける `*name`（末尾のみ）で構成します。
 
 ```csharp
-using Miya;
-
-var app = new App<MyContext>();
-
-app.Use(static async (context, next) =>
-{
-    context.CurrentUser = new User(context.Req.Header("X-User") ?? "anonymous");
-    await next(context);
-});
-
-app.Get("/me", static context => context.Json(context.CurrentUser));
-
-public sealed class MyContext : Context
-{
-    public User? CurrentUser { get; set; }
-}
-
-public sealed record User(string Id);
+app.Get("/users", ListUsers);
+app.Get("/users/:id", GetUser);      // c.Param("id")
+app.Get("/files/*path", GetFile);    // c.Param("path") が残りのパスを受ける
+app.Post("/users", CreateUser);
 ```
 
-ミドルウェアはルートの前に登録順で走り、`next(context)` の完了後に逆順で戻ります。`next` を複数回呼ぶと拒否されます。
+`Get`、`Post`、`Put`、`Delete`、`Patch`、`Head`、`Options`、`All`、`On(method, ...)` がハンドラーを登録します。`app.Route(prefix, subApp)` は別の `App` をパスの prefix の下にマウントします。
 
-## ルーティングの挙動
+2 つのパターンが同じパスに一致し得る場合は、より具体的な方が勝ちます。各セグメントで、静的テキストが `:name` より優先し、`:name` が `*name` より優先します。具体度が同じパターンは登録順に試します。
 
-ルートのパターンは、静的セグメント、1 セグメントの `:name`、残りのパスを受ける `*name` で構成します。ワイルドカードは末尾のセグメントでなければなりません。各セグメントでは静的なテキストがパラメータより優先し、パラメータがワイルドカードより優先します。優先順位が同じルートは登録順になります。
+メソッドとパスの扱いは HTTP に従います。
 
-`Get`、`Post`、`Put`、`Delete`、`Patch`、`Head`、`Options`、`All`、`On` がハンドラーを登録します。`Route(prefix, subApp)` は別のアプリケーションをマウントし、prefix と子ルートの接合部を正規化します。
+- 既知のパスでメソッドが違う場合は、405 と `Allow` ヘッダーを返します。
+- `GET` ルートは、同じパスの `HEAD` にも応答します。ヘッダーと `Content-Length` は同じで、本文はありません。
+- 明示的な `OPTIONS` ルートがパスを処理しない場合、`OPTIONS` には `Allow` ヘッダー付きの 204 を返します。
+- どのルートにも一致しないパスは 404 を返します。`app.NotFound(handler)` で独自のものを登録できます。
 
-パスが一致してメソッドが違う場合は 405 と `Allow` ヘッダーを返します。明示的な HEAD ルートがなければ、GET ルートが HEAD も処理し、GET のヘッダーと `Content-Length` を保ったまま本文を抑止します。パスが存在して明示的な OPTIONS ルートが処理しない場合、OPTIONS には `Allow` 付きの 204 を返します。どのルートにも一致しないパスは 404 になります。
+照合は Kestrel がすでにデコードしたパスを ordinal 比較で使います。エンコードされたスラッシュ（`%2F`）は照合中はエンコードのままなので、`/items/a%2Fb` は `/items/:id` に一致し、`c.Param("id")` がそれを `a/b` にデコードします。不正なパーセントエスケープは 400 を返します。`/users` と `/users/` は別のルートで、v0 では両者の間でリダイレクトしません。
 
-照合は Kestrel がデコードした `Path` を ordinal 比較で使い、Unicode 正規化はしません。Kestrel は `%2F` のようなエンコードされたスラッシュをパスに残します。`Param()` は照合後にそれをデコードするので、`/items/a%2Fb` は `/items/:id` に一致し、`id` は `a/b` になります。不正なパーセントエスケープは 400 を返します。`/users` と `/users/` は別のルートで、v0 では両者の間でリダイレクトしません。
+## ミドルウェア
 
-リテラルのパターンはジェネレーターが解析して検証します。動的な文字列から作ったルートは登録時に一度だけ解析され、照合の挙動は同じです。
+`app.Use` はすべてのリクエストを包みます。ミドルウェアはルートの前に登録順で走り、`next` が戻った後に逆順で戻ります。そのためリクエストと、処理を終えたレスポンスの両方に手を加えられます。`next` を複数回呼ぶと拒否されます。
 
-## MiyaJson codec
+```csharp
+app.Use(static async (c, next) =>
+{
+    var stopwatch = Stopwatch.StartNew();
+    await next(c);
+    c.Header("Server-Timing", $"app;dur={stopwatch.Elapsed.TotalMilliseconds}");
+});
+```
 
-MiyaJson の契約は、生成または手書きの `IMiyaJsonCodec<T>` です。生成された codec は module initializer によってジェネリックな静的領域に登録されます。`context.Json(value)`、`context.Req.Json<T>()`、`MiyaJson` の各エントリーポイントはその登録先を使います。アセンブリスキャンは関与しません。
+`app.Use("/admin", middleware)` は、ミドルウェアを prefix 配下のパスに限定します。`app.OnError(handler)` は、リクエスト処理中に投げられた例外を扱います。
 
-コンパイラのインターセプターは、判明している呼び出し箇所を生成コードの直接呼び出しに置き換える最適化です。呼び出しがインターセプトされない場合でも、codec が登録済みであればシリアライズは動きます。ジェネリックヘルパー内の呼び出しや、別アセンブリでコンパイルされた呼び出しも同様です。具体型がジェネリックコードを通じてしか現れない場合は `MiyaJson.Include<T>()` で生成を要求します。
+## JSON の返し方と読み方
+
+Miya は自前のシリアライザー MiyaJson で JSON を読み書きします。普通に使う分には設定は不要です。オブジェクトを返せば Miya が JSON として書きます。
+
+```csharp
+app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
+
+app.Post("/users", async c =>
+{
+    var user = await c.Req.Json<User>();   // リクエスト本文をパース
+    await c.Json(user);                    // JSON として書き返す
+});
+
+public sealed record User(string Id, string Name);
+```
+
+ビルド時にジェネレーターが各 `c.Json(...)` と `c.Req.Json<T>()` の呼び出しを読み、シリアライズする型を集め、それらを読み書きするコードを生成します。実行時には何も探索しません。これが NativeAOT で動く理由です。プロパティ名は既定で `camelCase` です。C# のプロパティ名の大文字小文字を保つには `<MiyaJsonNaming>PascalCase</MiyaJsonNaming>` を設定します。
+
+### 対応する型
+
+生成されるシリアライズは、真偽値と数値のプリミティブ、`char`、`string`、`Guid`、`DateTime`、`DateTimeOffset`、`decimal`、数値の enum、nullable な値、一次元配列、`List<T>`、`Dictionary<string, T>` に対応します。自分で定義した `public` または `internal` の class、record、struct は、これらの型を再帰的に組み合わせられます。record は primary constructor が必要です。通常のクラスはパラメーターなしコンストラクターと、アクセス可能な `get` と `set`/`init` を持つプロパティが必要です。
+
+interface、`object`、ポリモーフィックな型、クラス継承、匿名型、private メンバー、ref-like 型、開いたジェネリック型、多次元配列、string 以外をキーに持つ dictionary は対象外です。使うと、その型を名指しするコンパイルエラーになります。
+
+### ジェネリックコードを通じてしか現れない型
+
+ジェネレーターは、読み取れる呼び出し箇所から型を見つけます。型がジェネリックコードを通じてしかシリアライズされない場合、その型を名指しする呼び出し箇所がないので、ジェネレーターは見つけられません。そのような型は `MiyaJson.Include<T>()` で一度マークします。
 
 ```csharp
 MiyaJson.Include<User>();
 ```
 
-codec が登録されていない場合、MiyaJson はジェネレーターの追加方法、`miya-gen` の使用、`Include<T>()` の呼び出し、手書き codec の登録のいずれかを案内する例外を投げます。
+### codec を手書きする
 
-### 手書き codec の登録
+codec は、1 つの型を JSON として読み書きする小さなクラスです。対応する型ごとに、ジェネレーターが codec を書きます。ジェネレーターが対応しない型を扱いたいとき、あるいは特定の JSON の形が必要なときは、`IMiyaJsonCodec<T>` を実装して codec を書き、`MiyaJson.Register` で登録します。登録した codec は、その型をシリアライズするすべての箇所で使われます。直接の `c.Json` 呼び出しも含みます。
 
 ```csharp
 using Miya.Json;
@@ -197,11 +227,9 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
 }
 ```
 
-生成される型モデルは、真偽値と数値のプリミティブ、`char`、`string`、`Guid`、`DateTime`、`DateTimeOffset`、`decimal`、数値の enum、nullable な値、一次元配列、`List<T>`、`Dictionary<string, T>` に対応します。public または internal の class、record、struct は、これらの型を再帰的に組み合わせられます。record は primary constructor が必要です。POCO クラスは public または internal のパラメーターなしコンストラクターが必要で、シリアライズするプロパティにはアクセス可能な get と set/init のアクセサーが必要です。
+### 信頼できない入力に対する上限
 
-interface、`object`、ポリモーフィックな契約、クラス継承、匿名型、private メンバー、ref-like 型、開いたジェネリック型、多次元配列、string 以外をキーに持つ dictionary は、生成 codec の対象外です。
-
-### 既定の上限
+MiyaJson は、壊れた入力や悪意ある JSON がメモリやスタックを使い尽くせないよう上限を設けます。既定値はネットワークからの入力に対して安全で、`MiyaOptions` と `MiyaJsonOptions` で設定します。
 
 | 設定 | 既定値 |
 | --- | ---: |
@@ -217,11 +245,11 @@ interface、`object`、ポリモーフィックな契約、クラス継承、匿
 
 NaN と Infinity は既定で拒否します。`MiyaJsonOptions` は、時間のかかるシリアライズとパースのためのキャンセルトークンも持ちます。
 
-## miya-gen によるソース生成
+ビルド時の最適化として、Miya は認識できる `c.Json` とルートの呼び出しを、生成コードへの直接呼び出しに置き換えます。これには interceptors という C# の機能を使います。この置き換えで観測できる挙動は変わりません。呼び出しが置き換えられたかどうかにかかわらず、シリアライズとルーティングの挙動は同じで、ジェネレーターが見つけられない呼び出しも、codec が登録されていれば動きます。
 
-`miya-gen` は、コンパイラ統合のソースジェネレーターが使えない環境で、同じ生成コアを使います。JSON codec、module initializer による登録、解析済みのルートテンプレートを通常の `.cs` ファイルとして書き出します。インターセプターは出力しないので、直接呼び出しの最適化だけが無効になります。
+## コンパイラのジェネレーターなしでソースを生成する
 
-パッケージフィードからツールをインストールまたは更新し、プロジェクトに含まれるディレクトリへ生成します。
+ビルド構成によっては、コンパイラ統合のソースジェネレーターを動かせません。`miya-gen` は、同じ JSON とルーティングのコードを通常の `.cs` ファイルとして、ビルドの一手順で生成します。interceptors の最適化は出力しないので、直接呼び出しによる高速化だけがなくなります。挙動は同じです。
 
 ```sh
 dotnet tool install --global Miya.Gen --version 1.0.0
@@ -230,7 +258,7 @@ miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
 ```
 
-出力ディレクトリがプロジェクトのルート配下にあれば、SDK は `Generated/*.cs` を自動的に含めます。プロジェクトの外にあるディレクトリは `Compile` アイテムで追加します。このリポジトリでは、同等の生成コマンドは次のとおりです。
+出力ディレクトリがプロジェクトのルート配下にあれば、SDK は `Generated/*.cs` を自動的にコンパイルします。外にあるディレクトリは `Compile` アイテムで追加します。生成の前にプロジェクトがコンパイルできる必要があり、出力ディレクトリにある既存の `Miya.*.g.cs` は置き換えられます。このリポジトリでは、同等のコマンドは次のとおりです。
 
 ```sh
 dotnet run --project src/Miya.Gen -- \
@@ -238,19 +266,44 @@ dotnet run --project src/Miya.Gen -- \
   --output samples/Hello/Generated
 ```
 
-生成の前にプロジェクトがコンパイルできる必要があります。出力ディレクトリにある既存の `Miya.*.g.cs` ファイルは置き換えられます。
+## 型付きコンテキスト
 
-## Kestrel によるホスティング
+既定では、ハンドラーのコンテキストはリクエストとレスポンスのデータだけを運びます。自分の値をミドルウェアからハンドラーへ型安全に渡すには、`Context` を継承して `App<TContext>` を使います。文字列キーもキャストもありません。
 
-`Run(int? port = null)` は loopback の HTTP/1.1 リスナーを起動し、キャンセルまたは終了シグナルまでブロックします。`Run()` はポートを未指定のままにし、`PORT` 環境変数を有効にします。`Run(8080)` は明示的な指定です。他のプロトコルは `MiyaOptions.Protocols` と `MiyaOptions.Certificate` を `RunAsync` または `StartAsync` で設定します。
+```csharp
+using Miya;
 
-`RunAsync(MiyaOptions?, CancellationToken)` と `StartAsync(MiyaOptions?, CancellationToken)` は非同期のホスティングを提供します。`StartAsync` は、バインドしたアドレスと `StopAsync` を持つ `MiyaServer` を返します。ポート 0 は OS が割り当てるポートを要求します。
+var app = new App<MyContext>();
 
-ポートの選択は、まず明示的な `Run(port)` の値、次に `MiyaOptions.Port`、次に `PORT` に入った妥当な整数、最後に 3000 を使います。0 から 65535 の範囲外の値は、明示的に渡された場合もオプションで渡された場合も拒否します。`PORT` が不正な値のときは無視して 3000 にフォールバックします。
+app.Use(static async (c, next) =>
+{
+    c.CurrentUser = new User(c.Req.Header("X-User") ?? "anonymous");
+    await next(c);
+});
 
-SIGINT、SIGTERM、キャンセルは新規リクエストの受付を止め、処理中のリクエストを待ちます。既定のシャットダウンタイムアウトは 30 秒です。2 回目のシグナルはプロセスを即座に終了します。レスポンス本文は、1 MiB の既定値を超えるか `Stream` を使わない限り、ミドルウェアが戻るまでバッファに保持します。`next` の後のヘッダー変更は、レスポンスがバッファのままの間だけできます。
+app.Get("/me", static c => c.Json(c.CurrentUser));
 
-証明書がない場合、既定のプロトコルは HTTP/1.1 です。平文の HTTP/2 には `MiyaProtocols.Http2` を選びます。
+public sealed class MyContext : Context
+{
+    public User? CurrentUser { get; set; }
+}
+
+public sealed record User(string Id);
+```
+
+派生コンテキストはリクエストごとに新しく作られます。プールして再利用したい場合は、`IPoolableContext` を実装し、`OnReturn()` で自分のフィールドを消します。
+
+## ホスティング
+
+`Run(int? port = null)` は loopback の HTTP/1.1 リスナーを起動し、キャンセルまたは終了シグナルまでブロックします。`Run()` はポートを未指定にするので `PORT` 環境変数が有効になります。`Run(8080)` はポートを明示的に選びます。`RunAsync(options, ct)` と `StartAsync(options, ct)` は非同期でホストします。`StartAsync` は、バインドしたアドレスと `StopAsync` を持つ `MiyaServer` を返します。ポート 0 は OS に空きポートを要求します。
+
+ポートの選択は、まず明示的な `Run(port)` の値、次に `MiyaOptions.Port`、次に `PORT` に入った妥当な整数、最後に 3000 を使います。明示的またはオプションで渡された 0 から 65535 の範囲外の値は拒否します。`PORT` が不正な値のときは無視します。
+
+SIGINT、SIGTERM、キャンセルは新規リクエストの受付を止め、処理中のものを待ちます。既定のシャットダウンタイムアウトは 30 秒です。2 回目のシグナルはプロセスを即座に終了します。
+
+### HTTP/2 と HTTP/3
+
+証明書がない場合、既定は HTTP/1.1 です。平文の HTTP/2 には `MiyaProtocols.Http2` を選びます。
 
 ```csharp
 await app.RunAsync(new MiyaOptions
@@ -261,14 +314,12 @@ await app.RunAsync(new MiyaOptions
 
 平文のリスナーは ALPN のネゴシエーションがないため、HTTP/1.1 と HTTP/2 を同時に提供できません。Miya はその組み合わせを起動時に拒否します。
 
-`X509Certificate2` を渡すと、Miya 内で TLS を終端します。証明書を渡したときの既定は、ALPN で選ばれる HTTP/1.1 と HTTP/2 です。
+`X509Certificate2` を渡すと、Miya 内で TLS を終端します。証明書を渡したときの既定は、接続ごとに ALPN で選ばれる HTTP/1.1 と HTTP/2 です。
 
 ```csharp
 using System.Security.Cryptography.X509Certificates;
 
-using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
-    "server.pfx",
-    "certificate-password");
+using var certificate = X509CertificateLoader.LoadPkcs12FromFile("server.pfx", "certificate-password");
 
 await app.RunAsync(new MiyaOptions
 {
@@ -286,11 +337,13 @@ await app.RunAsync(new MiyaOptions
 });
 ```
 
-HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起動時に `PlatformNotSupportedException` を投げます。以下の計測に使った macOS arm64 環境では `QuicListener.IsSupported` は false を返しました。その条件では HTTP/3 の統合テストをスキップしました。HTTP/1.1 または HTTP/2 が HTTP/3 と同じエンドポイントを共有すると、Kestrel は `Alt-Svc` を自動的に有効にします。
+HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起動時に `PlatformNotSupportedException` を投げます。以下の計測に使った macOS arm64 環境では false を返したので、そこでは HTTP/3 の統合テストをスキップしました。
 
-`ConfigureKestrel` は、他の対応する Kestrel 設定のために使えます。証明書の指定は `MiyaOptions.Certificate` に置きます。Miya は開発用証明書を探したり、Kestrel のエンドポイント設定ファイルを読み込んだりはしません。
+### Kestrel の高度な設定
 
-`MiyaOptions.ConfigureServices` は、内部の Kestrel ホストに追加のサービスを登録します。Miya が依存性注入を必要とすることはありません。このフックは Kestrel を高度にカスタマイズするためだけのものです。設定すると、平文のエンドポイントでもサービス経由のホスティングパスを選びます。登録したサービスはサーバー内部に留まり、ハンドラーやミドルウェアには届きません。
+`ConfigureKestrel` は、他の対応する Kestrel 設定に届きます。証明書の指定は `MiyaOptions.Certificate` に置きます。Miya は開発用証明書を探したり、Kestrel のエンドポイント設定ファイルを読んだりはしません。
+
+`MiyaOptions.ConfigureServices` は、内部の Kestrel ホストに追加のサービスを登録します。Miya が依存性注入を必要とすることはありません。このフックは Kestrel を高度にカスタマイズするためだけのものです。設定すると、平文のエンドポイントでもサービス経由のホスティングパスを使います。登録したサービスはサーバー内部に留まり、ハンドラーやミドルウェアには届きません。
 
 ## 計測結果
 
@@ -396,11 +449,11 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 の制限
 
-Miya v0 は、WebSocket のアップグレード、静的ファイルの配信、OpenAPI ドキュメントの生成に対応しません。認証、バリデーション、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは任意です。
+Miya v0 は、WebSocket のアップグレード、静的ファイルの配信、OpenAPI ドキュメントの生成に対応しません。認証、バリデーション、テンプレート、開発用証明書の探索、設定ファイル連携も提供しません。HTTP/3 は `QuicListener.IsSupported` と渡した証明書に依存します。TLS 終端のためのリバースプロキシは選択肢として使えます。
 
-ルートのジェネレーターは、v0 ではルート単位の照合コードや統合した trie を出力しません。リテラルのパターンをコンパイル時に検証・解析し、解析済みのテンプレートをランタイムマッチャーのために埋め込みます。
+ルートのジェネレーターは、リテラルのパターンをコンパイル時に検証・解析し、解析済みのテンプレートを埋め込みます。照合はランタイムマッチャーが行います。ルート単位の照合コードや統合した trie はまだ出力しません。
 
-診断 MIYA001 から MIYA004 は、匿名 JSON 型、不正なルート、限定的な重複ルート検出、非対応の JSON 型を扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装です。`IPoolableContext.OnReturn()` は呼び出し側の責任のままです。
+診断 MIYA001 から MIYA004 は、匿名 JSON 型、不正なルート、限定的な重複ルート検出、非対応の JSON 型を扱います。プールされる派生コンテキストで消し忘れたフィールドを検出する MIYA005 は未実装なので、`IPoolableContext.OnReturn()` でそれらを消すのは呼び出し側の責任のままです。
 
 ## ライセンス
 

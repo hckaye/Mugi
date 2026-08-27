@@ -2,17 +2,15 @@
 
 English | [日本語](README.ja.md)
 
-Miya is a small HTTP framework for .NET 10 designed around NativeAOT. Applications do not require `WebApplication`, the Generic Host, or a DI container. Miya constructs Kestrel directly for cleartext HTTP/1.1 and HTTP/2, and uses Kestrel's built-in service registration internally for TLS and HTTP/3. The runtime performs no reflection, assembly scanning, or runtime code generation. Handlers are lambdas rather than attributed controller methods.
+Miya is a fast, simple HTTP framework for .NET 10. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, read the request and write the response through one context object, and run on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
-Route templates and JSON codecs are generated at compile time. The routing generator validates literal patterns and embeds parsed templates; v0 still uses the shared runtime matcher. Generated JSON codecs register themselves through module initializers. The request API follows a context model with `Text`, `Json`, `Param`, and `Query` methods. Middleware is composed in onion order around the selected route.
+Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing and JSON are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
 
-## Requirements and project setup
+Miya targets `net10.0`. The measurements in this document used .NET SDK 10.0.203.
 
-Miya targets `net10.0`. The measurements below used .NET SDK 10.0.203.
+## Install
 
-### NuGet package references
-
-An application using locally packed or published packages needs the runtime and generator packages:
+Add the runtime package and the generator package. The generator runs during the build and produces the routing and JSON code for your app.
 
 ```xml
 <PropertyGroup>
@@ -27,19 +25,11 @@ An application using locally packed or published packages needs the runtime and 
 </ItemGroup>
 ```
 
-The `Miya.Generators` package contains the analyzer assembly and a `buildTransitive` props file. The props file adds the analyzer and `Miya.Generated` interceptor namespace, including when the package arrives through a project reference. The explicit `InterceptorsNamespaces` property above also works when switching between package and source references.
+The `InterceptorsNamespaces` line is required. It lets the generator replace the calls it recognizes with faster direct calls. The `Miya.Generators` package carries the generator as an analyzer and a `buildTransitive` props file that sets this up automatically, including when the package arrives through another project reference.
 
-### Project references
-
-Repository projects expose `Miya.Generators` to the compiler as an analyzer:
+When you reference the projects directly in a repository, pass the generator to the compiler as an analyzer:
 
 ```xml
-<PropertyGroup>
-  <TargetFramework>net10.0</TargetFramework>
-  <PublishAot>true</PublishAot>
-  <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
-</PropertyGroup>
-
 <ItemGroup>
   <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
   <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
@@ -48,95 +38,135 @@ Repository projects expose `Miya.Generators` to the compiler as an analyzer:
 </ItemGroup>
 ```
 
-`MiyaJsonNaming` selects generated property names. Its default is `camelCase`; set `<MiyaJsonNaming>PascalCase</MiyaJsonNaming>` to preserve C# property casing.
-
 ## Quick start
 
 ```csharp
-using System.Diagnostics;
-using System.Globalization;
 using Miya;
 
 var app = new App();
 
-app.Use(static async (context, next) =>
-{
-    var stopwatch = Stopwatch.StartNew();
-    await next(context);
-    context.Header(
-        "Server-Timing",
-        $"app;dur={stopwatch.Elapsed.TotalMilliseconds.ToString("0.###", CultureInfo.InvariantCulture)}");
-});
-
-app.Get("/", static context => context.Text("Hello"));
-app.Get("/users/:id", static context => context.Json(new User(context.Param("id"))));
+app.Get("/", static c => c.Text("Hello"));
+app.Get("/users/:id", static c => c.Json(new User(c.Param("id"), "Ada")));
 
 app.Run();
 
-internal sealed record User(string Id);
+public sealed record User(string Id, string Name);
 ```
 
-Run the application on the default port:
+Run it and send a request:
 
 ```sh
 dotnet run
 curl -i http://127.0.0.1:3000/users/42
 ```
 
-`PORT=8080 dotnet run` changes the listener without changing the program.
+`GET /users/42` returns `{"id":"42","name":"Ada"}`. The default port is 3000; `PORT=8080 dotnet run` changes the listener without touching the code.
 
-## Typed contexts
+## The context object
 
-`App<TContext>` carries application-specific request state without string keys or casts. Derived contexts are created per request unless they implement `IPoolableContext`. A pooled derived context must clear its own fields in `OnReturn()`.
+Every handler receives one context, named `c` here. It reads the incoming request and builds the response.
+
+Read the request:
+
+| Call | Returns |
+| --- | --- |
+| `c.Req.Method`, `c.Req.Path` | the HTTP method and path |
+| `c.Param("id")` | a route parameter, such as the `:id` segment |
+| `c.Query("q")` | a query-string value, or null |
+| `c.Req.Header("X-User")` | a request header, or null |
+| `await c.Req.Text()` | the request body as text |
+| `await c.Req.Json<T>()` | the request body parsed into `T` |
+
+Write the response:
+
+| Call | Effect |
+| --- | --- |
+| `c.Text(string)` | writes a `text/plain` body |
+| `c.Json(value)` | writes `value` as JSON |
+| `c.Html(string)` | writes a `text/html` body |
+| `c.Bytes(data, contentType)` | writes raw bytes |
+| `c.Stream(contentType, write)` | streams a response through a callback |
+| `c.Status(code)` | sets the status code |
+| `c.Header(name, value)` | sets a response header; `c.AppendHeader` adds another value |
+| `c.Redirect(location)` | sends a redirect, 302 by default |
+| `c.NotFound()` | sends a 404 |
+
+`c.Aborted` is a `CancellationToken` that fires when the client disconnects. The response stays buffered until your handler and middleware finish, so you can still change the status or headers after writing a body, as long as the response has not started streaming.
+
+## Routing
+
+Register a handler for an HTTP method and a path pattern. A pattern is made of static segments, `:name` for a single segment, and `*name` for the rest of the path (only as the last segment).
 
 ```csharp
-using Miya;
-
-var app = new App<MyContext>();
-
-app.Use(static async (context, next) =>
-{
-    context.CurrentUser = new User(context.Req.Header("X-User") ?? "anonymous");
-    await next(context);
-});
-
-app.Get("/me", static context => context.Json(context.CurrentUser));
-
-public sealed class MyContext : Context
-{
-    public User? CurrentUser { get; set; }
-}
-
-public sealed record User(string Id);
+app.Get("/users", ListUsers);
+app.Get("/users/:id", GetUser);      // c.Param("id")
+app.Get("/files/*path", GetFile);    // c.Param("path") captures the remaining path
+app.Post("/users", CreateUser);
 ```
 
-Middleware runs in registration order before the route and unwinds in reverse order after `next(context)` completes. Calling `next` more than once is rejected.
+`Get`, `Post`, `Put`, `Delete`, `Patch`, `Head`, `Options`, `All`, and `On(method, ...)` register handlers. `app.Route(prefix, subApp)` mounts another `App` under a path prefix.
 
-## Routing behavior
+When two patterns can match the same path, the more specific one wins: at each segment a static text beats `:name`, and `:name` beats `*name`. Patterns of equal specificity are tried in registration order.
 
-Route patterns contain static segments, `:name` for one segment, and `*name` for the remaining path. A wildcard must be the final segment. At each segment, static text has priority over a parameter, and a parameter has priority over a wildcard. Routes with equal priority use registration order.
+Method and path handling follows HTTP:
 
-`Get`, `Post`, `Put`, `Delete`, `Patch`, `Head`, `Options`, `All`, and `On` register handlers. `Route(prefix, subApp)` mounts another application and normalizes the join between the prefix and child route.
+- A known path with the wrong method returns 405 with an `Allow` header.
+- A `GET` route also answers `HEAD` for the same path, with the same headers and `Content-Length` but no body.
+- `OPTIONS` returns 204 with an `Allow` header when no explicit `OPTIONS` route handles the path.
+- Any unmatched path returns 404. Register your own with `app.NotFound(handler)`.
 
-A matching path with the wrong method returns 405 and an `Allow` header. A GET route also handles HEAD when no explicit HEAD route exists, preserving the GET headers and `Content-Length` while suppressing the body. OPTIONS returns 204 with `Allow` when the path exists and no explicit OPTIONS route handles it. An unmatched path returns 404.
+Matching uses the path Kestrel already decoded, compared by ordinal. An encoded slash (`%2F`) stays encoded during matching, so `/items/a%2Fb` matches `/items/:id`; `c.Param("id")` then decodes it to `a/b`. An invalid percent escape returns 400. `/users` and `/users/` are different routes, and v0 does not redirect between them.
 
-Matching uses Kestrel's decoded `Path` with ordinal comparisons and no Unicode normalization. Kestrel leaves an encoded slash such as `%2F` in the path. `Param()` decodes it after matching, so `/items/a%2Fb` matches `/items/:id` and returns `a/b` for `id`. Invalid percent escapes return 400. `/users` and `/users/` are distinct routes, and v0 does not redirect between them.
+## Middleware
 
-Literal patterns are parsed and validated by the generator. A route built from a dynamic string is parsed once when it is registered and has the same matching behavior.
+`app.Use` wraps every request. Middleware runs in registration order before the route and unwinds in reverse order after `next` returns, so you can act on both the request and the finished response. Calling `next` more than once is rejected.
 
-## MiyaJson codecs
+```csharp
+app.Use(static async (c, next) =>
+{
+    var stopwatch = Stopwatch.StartNew();
+    await next(c);
+    c.Header("Server-Timing", $"app;dur={stopwatch.Elapsed.TotalMilliseconds}");
+});
+```
 
-The MiyaJson contract is a generated or hand-written `IMiyaJsonCodec<T>`. Generated codecs are registered in generic static storage by a module initializer. `context.Json(value)`, `context.Req.Json<T>()`, and the `MiyaJson` entry points use that registry. No assembly scan is involved.
+`app.Use("/admin", middleware)` limits a middleware to paths under a prefix. `app.OnError(handler)` handles exceptions thrown while processing a request.
 
-Compiler interceptors replace known call sites with direct generated calls as an optimization. Serialization still works when a call is not intercepted, including generic helpers and calls compiled in another assembly, as long as a codec has been registered. `MiyaJson.Include<T>()` requests generation when a concrete type appears only through generic code:
+## Returning and reading JSON
+
+Miya reads and writes JSON with its own serializer, MiyaJson. In the common case you configure nothing: return an object and Miya writes it as JSON.
+
+```csharp
+app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
+
+app.Post("/users", async c =>
+{
+    var user = await c.Req.Json<User>();   // parse the request body
+    await c.Json(user);                    // write it back as JSON
+});
+
+public sealed record User(string Id, string Name);
+```
+
+At build time the generator reads each `c.Json(...)` and `c.Req.Json<T>()` call, collects the types you serialize, and generates the code that reads and writes them. Nothing is discovered at runtime, which is why this works under NativeAOT. Property names are `camelCase` by default; set `<MiyaJsonNaming>PascalCase</MiyaJsonNaming>` to keep the C# casing.
+
+### Supported types
+
+Generated serialization covers Boolean and numeric primitives, `char`, `string`, `Guid`, `DateTime`, `DateTimeOffset`, `decimal`, numeric enums, nullable values, one-dimensional arrays, `List<T>`, and `Dictionary<string, T>`. Your own `public` or `internal` classes, records, and structs may combine those types, including recursively. A record needs a primary constructor; a plain class needs a parameterless constructor and properties with accessible `get` and `set`/`init`.
+
+Interfaces, `object`, polymorphic types, class inheritance, anonymous types, private members, ref-like types, open generic types, multidimensional arrays, and dictionaries with non-string keys are not supported. Using one produces a compile-time error that names the type.
+
+### Types reached only through generics
+
+The generator finds types at the call sites it can read. If a type is serialized only through generic code, no call site names it directly, so the generator cannot see it. Mark such a type once with `MiyaJson.Include<T>()`:
 
 ```csharp
 MiyaJson.Include<User>();
 ```
 
-If no codec is registered, MiyaJson reports how to add the generator, use `miya-gen`, call `Include<T>()`, or register a codec by hand.
+### Writing a codec by hand
 
-### Hand-written codec registration
+A codec is the small class that reads and writes one type as JSON. The generator writes one codec per supported type for you. When you need a type the generator does not support, or a specific JSON shape, write a codec by implementing `IMiyaJsonCodec<T>` and register it with `MiyaJson.Register`. A registered codec is used everywhere that type is serialized, including direct `c.Json` calls.
 
 ```csharp
 using Miya.Json;
@@ -197,11 +227,9 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
 }
 ```
 
-The generated type model supports Boolean and numeric primitives, `char`, `string`, `Guid`, `DateTime`, `DateTimeOffset`, `decimal`, numeric enums, nullable values, one-dimensional arrays, `List<T>`, and `Dictionary<string, T>`. Public or internal classes, records, and structs may compose those types recursively. Records require a primary constructor. POCO classes require a public or internal parameterless constructor, and serialized properties require accessible get and set/init accessors.
+### Limits for untrusted input
 
-Interfaces, `object`, polymorphic contracts, class inheritance, anonymous types, private members, ref-like types, open generic types, multidimensional arrays, and dictionaries with non-string keys are not supported by generated codecs.
-
-### Default limits
+MiyaJson enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `MiyaOptions` and `MiyaJsonOptions`.
 
 | Setting | Default |
 | --- | ---: |
@@ -215,13 +243,13 @@ Interfaces, `object`, polymorphic contracts, class inheritance, anonymous types,
 | Buffered response, `MiyaOptions.MaxBufferedResponseBytes` | 1 MiB |
 | Request body, `MiyaOptions.MaxRequestBodyBytes` | 30 MiB |
 
-NaN and Infinity are rejected by default. `MiyaJsonOptions` also carries a cancellation token for long serialization and parsing operations.
+NaN and Infinity are rejected by default. `MiyaJsonOptions` also carries a cancellation token for long serialization and parsing.
 
-## Generating source with miya-gen
+As a build-time optimization, Miya replaces the `c.Json` and route calls it recognizes with direct calls into the generated code, using a C# feature called interceptors. This changes nothing you observe: serialization and routing behave the same whether or not a call was replaced, and a call that the generator cannot see still works as long as a codec is registered.
 
-`miya-gen` uses the same generation core when compiler-integrated source generators are unavailable. It writes JSON codecs, module initializer registration, and parsed route templates as ordinary `.cs` files. It does not emit interceptors, so only the direct-call optimization is absent.
+## Generating source without the compiler generator
 
-Install or update the tool from a package feed, then generate into a directory included by the project:
+Some build setups cannot run compiler-integrated source generators. `miya-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
 
 ```sh
 dotnet tool install --global Miya.Gen --version 1.0.0
@@ -230,7 +258,7 @@ miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
 ```
 
-The SDK includes `Generated/*.cs` automatically when the directory is under the project root. A directory outside the project must be added with a `Compile` item. From this repository, the equivalent generator command is:
+The SDK compiles `Generated/*.cs` automatically when the directory is under the project root; a directory elsewhere must be added with a `Compile` item. The project must compile before generation, and existing `Miya.*.g.cs` files in the output directory are replaced. From this repository the equivalent command is:
 
 ```sh
 dotnet run --project src/Miya.Gen -- \
@@ -238,19 +266,44 @@ dotnet run --project src/Miya.Gen -- \
   --output samples/Hello/Generated
 ```
 
-The project must compile before generation. Existing `Miya.*.g.cs` files in the selected output directory are replaced.
+## Typed contexts
 
-## Kestrel hosting
+By default a handler's context carries only request and response data. To pass your own values from middleware to a handler with full type safety, derive from `Context` and use `App<TContext>`. There are no string keys and no casts.
 
-`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified, allowing the `PORT` environment variable to take effect. `Run(8080)` is an explicit selection. `MiyaOptions.Protocols` and `MiyaOptions.Certificate` configure other protocols through `RunAsync` or `StartAsync`.
+```csharp
+using Miya;
 
-`RunAsync(MiyaOptions?, CancellationToken)` and `StartAsync(MiyaOptions?, CancellationToken)` provide asynchronous hosting. `StartAsync` returns a `MiyaServer` with the bound addresses and `StopAsync`. Port 0 requests an operating-system-assigned port.
+var app = new App<MyContext>();
 
-Port selection uses an explicit `Run(port)` value first, then `MiyaOptions.Port`, then a valid integer in `PORT`, then 3000. Values outside 0 through 65535 are rejected when supplied explicitly or through options. An invalid `PORT` value is ignored and falls back to 3000.
+app.Use(static async (c, next) =>
+{
+    c.CurrentUser = new User(c.Req.Header("X-User") ?? "anonymous");
+    await next(c);
+});
 
-SIGINT, SIGTERM, and cancellation stop new requests and wait for active requests. The default shutdown timeout is 30 seconds. A second signal terminates the process immediately. Response bodies remain buffered until middleware returns unless they exceed the 1 MiB default or `Stream` is used; headers can be changed after `next` only while the response remains buffered.
+app.Get("/me", static c => c.Json(c.CurrentUser));
 
-Without a certificate, the default protocol is HTTP/1.1. Select `MiyaProtocols.Http2` for cleartext HTTP/2 prior knowledge:
+public sealed class MyContext : Context
+{
+    public User? CurrentUser { get; set; }
+}
+
+public sealed record User(string Id);
+```
+
+A derived context is created fresh for each request. If you want it pooled and reused, implement `IPoolableContext` and clear your own fields in `OnReturn()`.
+
+## Hosting
+
+`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified so the `PORT` environment variable applies; `Run(8080)` chooses the port explicitly. `RunAsync(options, ct)` and `StartAsync(options, ct)` host asynchronously; `StartAsync` returns a `MiyaServer` with the bound addresses and a `StopAsync` method. Port 0 asks the operating system for a free port.
+
+Port selection uses the explicit `Run(port)` value first, then `MiyaOptions.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
+
+SIGINT, SIGTERM, and cancellation stop accepting new requests and wait for the ones in flight, with a 30 second shutdown timeout by default. A second signal ends the process immediately.
+
+### HTTP/2 and HTTP/3
+
+Without a certificate the default is HTTP/1.1. Select `MiyaProtocols.Http2` for cleartext HTTP/2:
 
 ```csharp
 await app.RunAsync(new MiyaOptions
@@ -259,16 +312,14 @@ await app.RunAsync(new MiyaOptions
 });
 ```
 
-A cleartext listener cannot serve HTTP/1.1 and HTTP/2 together because it has no ALPN negotiation. Miya rejects that combination at startup.
+A cleartext listener cannot serve HTTP/1.1 and HTTP/2 at once, because it has no ALPN negotiation, and Miya rejects that combination at startup.
 
-Pass an `X509Certificate2` to terminate TLS in Miya. The default with a certificate is HTTP/1.1 and HTTP/2, selected through ALPN:
+Pass an `X509Certificate2` to terminate TLS inside Miya. With a certificate the default is HTTP/1.1 and HTTP/2, chosen per connection through ALPN:
 
 ```csharp
 using System.Security.Cryptography.X509Certificates;
 
-using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
-    "server.pfx",
-    "certificate-password");
+using var certificate = X509CertificateLoader.LoadPkcs12FromFile("server.pfx", "certificate-password");
 
 await app.RunAsync(new MiyaOptions
 {
@@ -276,7 +327,7 @@ await app.RunAsync(new MiyaOptions
 });
 ```
 
-HTTP/3 is opt-in and requires a certificate. Add the `Http3` flag while retaining HTTP/1.1 and HTTP/2 so clients can discover HTTP/3 through Kestrel's `Alt-Svc` response header:
+HTTP/3 is opt-in and needs a certificate. Add the `Http3` flag while keeping HTTP/1.1 and HTTP/2 so clients can discover HTTP/3 from Kestrel's `Alt-Svc` response header:
 
 ```csharp
 await app.RunAsync(new MiyaOptions
@@ -286,15 +337,17 @@ await app.RunAsync(new MiyaOptions
 });
 ```
 
-Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `QuicListener.IsSupported` is false. On the macOS arm64 system used for the measurements below, `QuicListener.IsSupported` returned false. The HTTP/3 integration test was skipped on that condition. Kestrel enables `Alt-Svc` automatically when HTTP/1.1 or HTTP/2 shares an endpoint with HTTP/3.
+Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `QuicListener.IsSupported` is false. On the macOS arm64 system used for the measurements below it returned false, so the HTTP/3 integration test was skipped there.
 
-`ConfigureKestrel` remains available for other supported Kestrel settings. Certificate selection belongs in `MiyaOptions.Certificate`; Miya does not search for a development certificate or load Kestrel endpoint configuration files.
+### Advanced Kestrel settings
 
-`MiyaOptions.ConfigureServices` registers additional services in the internal Kestrel host. Miya never requires dependency injection; this hook exists for advanced Kestrel customization. Setting it selects the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
+`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `MiyaOptions.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
+
+`MiyaOptions.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
 
 ## Measured results
 
-Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC, one launch, five warmup iterations, and ten measured iterations. The host was not otherwise isolated, so the error and standard-deviation columns in the generated BenchmarkDotNet reports should be considered when comparing close results.
+Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC, one launch, five warmup iterations, and ten measured iterations. The host was not otherwise isolated, so consider the error and standard-deviation columns in the BenchmarkDotNet reports when comparing close results.
 
 ### NativeAOT sample
 
@@ -396,11 +449,11 @@ MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
 
 ## v0 limitations
 
-Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, validation, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains optional for TLS termination.
+Miya v0 does not support WebSocket upgrades, serve static files, generate OpenAPI documents, or provide authentication, validation, templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
 
-The route generator does not emit route-specific matching code or a combined trie in v0. It validates and parses literal patterns at compile time, then embeds the parsed templates for the runtime matcher.
+The route generator validates and parses literal patterns at compile time and embeds the parsed templates; the runtime matcher does the matching. It does not yet emit route-specific matching code or a combined trie.
 
-Diagnostics MIYA001 through MIYA004 cover anonymous JSON types, invalid routes, limited duplicate-route detection, and unsupported JSON types. The planned MIYA005 diagnostic for fields left uncleared by pooled derived contexts is not implemented. `IPoolableContext.OnReturn()` remains the caller's responsibility.
+Diagnostics MIYA001 through MIYA004 cover anonymous JSON types, invalid routes, limited duplicate-route detection, and unsupported JSON types. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
 ## License
 
