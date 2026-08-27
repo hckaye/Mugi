@@ -361,6 +361,7 @@ public class Context
         {
             if (!suppress && bodyLength > 0)
             {
+                await ResponseBodyFeature.StartAsync(Aborted).ConfigureAwait(false);
                 ResponseBodyFeature.Writer.Write(_buffer.WrittenMemory.Span);
                 var flush = await ResponseBodyFeature.Writer.FlushAsync(Aborted).ConfigureAwait(false);
                 if (flush.IsCanceled)

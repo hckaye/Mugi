@@ -10,6 +10,11 @@ public sealed class MiyaOptions
 
     public ILoggerFactory? LoggerFactory { get; init; }
 
+    /// <summary>
+    /// Configures Kestrel after Miya adds its listener and before the server starts.
+    /// Miya guarantees only cleartext HTTP/1.1. Calling UseHttps here is unsupported because
+    /// the manual host does not create the DI services that UseHttps requires.
+    /// </summary>
     public Action<KestrelServerOptions>? ConfigureKestrel { get; init; }
 
     public int MaxBufferedResponseBytes { get; init; } = 1024 * 1024;
