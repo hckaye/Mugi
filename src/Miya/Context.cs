@@ -2,8 +2,6 @@ using System.Buffers;
 using System.Globalization;
 using System.IO.Pipelines;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
@@ -240,37 +238,6 @@ public class Context
 
         var writer = new JsonWriter(_responseWriter, _options.Json);
         codec.Write(ref writer, value);
-        writer.Flush();
-        return FinishBodyWrite();
-    }
-
-    public ValueTask Json<T>(T value, JsonTypeInfo<T> typeInfo)
-    {
-        EnsureActive();
-        ArgumentNullException.ThrowIfNull(typeInfo);
-        EnsureBodyMutable();
-        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
-        long measuredLength;
-        try
-        {
-            using var measurementJsonWriter = new Utf8JsonWriter(_measurementWriter);
-            JsonSerializer.Serialize(measurementJsonWriter, value, typeInfo);
-            measurementJsonWriter.Flush();
-            measuredLength = _measurementWriter.WrittenCount;
-        }
-        finally
-        {
-            _measurementWriter.Release();
-        }
-
-        BeginBufferedBody("application/json; charset=utf-8");
-        if (SuppressMeasuredBody(measuredLength))
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        using var writer = new Utf8JsonWriter(_responseWriter);
-        JsonSerializer.Serialize(writer, value, typeInfo);
         writer.Flush();
         return FinishBodyWrite();
     }
