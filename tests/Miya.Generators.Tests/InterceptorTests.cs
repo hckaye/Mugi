@@ -132,11 +132,17 @@ public sealed class InterceptorTests
                     var context = new Context();
                     typeof(Context).GetMethod("Initialize", BindingFlags.Instance | BindingFlags.NonPublic)!
                         .Invoke(context, new object?[] { features, null });
-                    await context.Json(new Payload(7));
-                    var completion = (ValueTask)typeof(Context)
-                        .GetMethod("CompleteResponse", BindingFlags.Instance | BindingFlags.NonPublic)!
-                        .Invoke(context, null)!;
-                    await completion;
+                    using ((IDisposable)typeof(Context)
+                        .GetMethod("EnterExecutionScope", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(context, null)!)
+                    {
+                        await context.Json(new Payload(7));
+                        var completion = (ValueTask)typeof(Context)
+                            .GetMethod("CompleteResponse", BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .Invoke(context, null)!;
+                        await completion;
+                    }
+
                     return Encoding.UTF8.GetString(stream.ToArray());
                 }
             }
