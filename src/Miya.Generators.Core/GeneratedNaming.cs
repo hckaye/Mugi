@@ -7,9 +7,9 @@ namespace Miya.Generators.Core;
 
 internal static class GeneratedNaming
 {
-    internal static string JsonPropertyName(string name, MiyaJsonNaming naming)
+    internal static string JsonPropertyName(string name, JsonNaming naming)
     {
-        return naming == MiyaJsonNaming.PascalCase ? name : CamelCase(name);
+        return naming == JsonNaming.PascalCase ? name : CamelCase(name);
     }
 
     internal static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);

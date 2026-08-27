@@ -12,7 +12,7 @@ public sealed class IncrementalGeneratorTests
         const string source = """
             using Miya.Json;
             internal sealed record Payload(int Id);
-            internal static class Marker { internal static void Include() => MiyaJson.Include<Payload>(); }
+            internal static class Marker { internal static void Include() => Json.Include<Payload>(); }
             """;
         var compilation = GeneratorTestHelper.CreateCompilation(source);
         var first = GeneratorTestHelper.Run(compilation, trackSteps: true);
@@ -52,17 +52,17 @@ public sealed class IncrementalGeneratorTests
         const string firstType = """
             using Miya.Json;
             internal sealed record First(int Id);
-            internal static class FirstMarker { internal static void Include() => MiyaJson.Include<First>(); }
+            internal static class FirstMarker { internal static void Include() => Json.Include<First>(); }
             """;
         const string changedFirstType = """
             using Miya.Json;
             internal sealed record First(int Id, string Name);
-            internal static class FirstMarker { internal static void Include() => MiyaJson.Include<First>(); }
+            internal static class FirstMarker { internal static void Include() => Json.Include<First>(); }
             """;
         const string secondType = """
             using Miya.Json;
             internal sealed record Second(int Id);
-            internal static class SecondMarker { internal static void Include() => MiyaJson.Include<Second>(); }
+            internal static class SecondMarker { internal static void Include() => Json.Include<Second>(); }
             """;
         var compilation = GeneratorTestHelper.CreateCompilation(firstType, "First.cs");
         var secondTree = CSharpSyntaxTree.ParseText(

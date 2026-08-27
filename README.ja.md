@@ -134,7 +134,7 @@ app.Use(static async (c, next) =>
 
 ## JSON の返し方と読み方
 
-Miya は自前のシリアライザー MiyaJson で JSON を読み書きします。普通に使う分には設定は不要です。オブジェクトを返せば Miya が JSON として書きます。
+Miya は自前のシリアライザー Json で JSON を読み書きします。普通に使う分には設定は不要です。オブジェクトを返せば Miya が JSON として書きます。
 
 ```csharp
 app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
@@ -158,28 +158,28 @@ interface、`object`、ポリモーフィックな型、クラス継承、匿名
 
 ### ジェネリックコードを通じてしか現れない型
 
-ジェネレーターは、読み取れる呼び出し箇所から型を見つけます。型がジェネリックコードを通じてしかシリアライズされない場合、その型を名指しする呼び出し箇所がないので、ジェネレーターは見つけられません。そのような型は `MiyaJson.Include<T>()` で一度マークします。
+ジェネレーターは、読み取れる呼び出し箇所から型を見つけます。型がジェネリックコードを通じてしかシリアライズされない場合、その型を名指しする呼び出し箇所がないので、ジェネレーターは見つけられません。そのような型は `Json.Include<T>()` で一度マークします。
 
 ```csharp
-MiyaJson.Include<User>();
+Json.Include<User>();
 ```
 
 ### codec を手書きする
 
-codec は、1 つの型を JSON として読み書きする小さなクラスです。対応する型ごとに、ジェネレーターが codec を書きます。ジェネレーターが対応しない型を扱いたいとき、あるいは特定の JSON の形が必要なときは、`IMiyaJsonCodec<T>` を実装して codec を書き、`MiyaJson.Register` で登録します。登録した codec は、その型をシリアライズするすべての箇所で使われます。直接の `c.Json` 呼び出しも含みます。
+codec は、1 つの型を JSON として読み書きする小さなクラスです。対応する型ごとに、ジェネレーターが codec を書きます。ジェネレーターが対応しない型を扱いたいとき、あるいは特定の JSON の形が必要なときは、`IJsonCodec<T>` を実装して codec を書き、`Json.Register` で登録します。登録した codec は、その型をシリアライズするすべての箇所で使われます。直接の `c.Json` 呼び出しも含みます。
 
 ```csharp
 using Miya.Json;
 
-MiyaJson.Register(UserCodec.Instance);
+Json.Register(UserCodec.Instance);
 
 internal sealed record User(int Id, string Name);
 
-internal sealed class UserCodec : IMiyaJsonCodec<User>
+internal sealed class UserCodec : IJsonCodec<User>
 {
     public static UserCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, User? value)
+    public void Write(ref JsonWriter writer, User? value)
     {
         if (value is null)
         {
@@ -194,7 +194,7 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
         writer.WriteRaw("}"u8);
     }
 
-    public User? Read(ref MiyaJsonReader reader)
+    public User? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -214,7 +214,7 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
             else if (property.SequenceEqual("name"u8))
             {
                 name = reader.ReadString()
-                    ?? throw new MiyaJsonException("The name cannot be null.");
+                    ?? throw new JsonException("The name cannot be null.");
             }
             else
             {
@@ -229,21 +229,21 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
 
 ### 信頼できない入力に対する上限
 
-MiyaJson は、壊れた入力や悪意ある JSON がメモリやスタックを使い尽くせないよう上限を設けます。既定値はネットワークからの入力に対して安全で、`MiyaOptions` と `MiyaJsonOptions` で設定します。
+Json は、壊れた入力や悪意ある JSON がメモリやスタックを使い尽くせないよう上限を設けます。既定値はネットワークからの入力に対して安全で、`Options` と `JsonOptions` で設定します。
 
 | 設定 | 既定値 |
 | --- | ---: |
-| JSON リクエスト本文、`MiyaOptions.MaxJsonBodyBytes` | 1 MiB |
+| JSON リクエスト本文、`Options.MaxJsonBodyBytes` | 1 MiB |
 | JSON ドキュメント全体、`MaxDocumentByteLength` | 1 MiB |
 | オブジェクトと配列の深さ、`MaxDepth` | 64 |
 | 1 つの文字列トークン、`MaxStringByteLength` | 1 MiB |
 | 1 つのオブジェクトのメンバー数または 1 つの配列の要素数、`MaxCollectionSize` | 1,048,576 |
 | 1 つの数値の桁数、`MaxNumberDigits` | 128 |
-| プールに保持する MiyaJson 一時バッファ、`MaxPooledBufferByteLength` | 64 KiB |
-| バッファリングするレスポンス、`MiyaOptions.MaxBufferedResponseBytes` | 1 MiB |
-| リクエスト本文、`MiyaOptions.MaxRequestBodyBytes` | 30 MiB |
+| プールに保持する Json 一時バッファ、`MaxPooledBufferByteLength` | 64 KiB |
+| バッファリングするレスポンス、`Options.MaxBufferedResponseBytes` | 1 MiB |
+| リクエスト本文、`Options.MaxRequestBodyBytes` | 30 MiB |
 
-NaN と Infinity は既定で拒否します。`MiyaJsonOptions` は、時間のかかるシリアライズとパースのためのキャンセルトークンも持ちます。
+NaN と Infinity は既定で拒否します。`JsonOptions` は、時間のかかるシリアライズとパースのためのキャンセルトークンも持ちます。
 
 ビルド時の最適化として、Miya は認識できる `c.Json` とルートの呼び出しを、生成コードへの直接呼び出しに置き換えます。これには interceptors という C# の機能を使います。この置き換えで観測できる挙動は変わりません。呼び出しが置き換えられたかどうかにかかわらず、シリアライズとルーティングの挙動は同じで、ジェネレーターが見つけられない呼び出しも、codec が登録されていれば動きます。
 
@@ -295,20 +295,20 @@ public sealed record User(string Id);
 
 ## ホスティング
 
-`Run(int? port = null)` は loopback の HTTP/1.1 リスナーを起動し、キャンセルまたは終了シグナルまでブロックします。`Run()` はポートを未指定にするので `PORT` 環境変数が有効になります。`Run(8080)` はポートを明示的に選びます。`RunAsync(options, ct)` と `StartAsync(options, ct)` は非同期でホストします。`StartAsync` は、バインドしたアドレスと `StopAsync` を持つ `MiyaServer` を返します。ポート 0 は OS に空きポートを要求します。
+`Run(int? port = null)` は loopback の HTTP/1.1 リスナーを起動し、キャンセルまたは終了シグナルまでブロックします。`Run()` はポートを未指定にするので `PORT` 環境変数が有効になります。`Run(8080)` はポートを明示的に選びます。`RunAsync(options, ct)` と `StartAsync(options, ct)` は非同期でホストします。`StartAsync` は、バインドしたアドレスと `StopAsync` を持つ `Server` を返します。ポート 0 は OS に空きポートを要求します。
 
-ポートの選択は、まず明示的な `Run(port)` の値、次に `MiyaOptions.Port`、次に `PORT` に入った妥当な整数、最後に 3000 を使います。明示的またはオプションで渡された 0 から 65535 の範囲外の値は拒否します。`PORT` が不正な値のときは無視します。
+ポートの選択は、まず明示的な `Run(port)` の値、次に `Options.Port`、次に `PORT` に入った妥当な整数、最後に 3000 を使います。明示的またはオプションで渡された 0 から 65535 の範囲外の値は拒否します。`PORT` が不正な値のときは無視します。
 
 SIGINT、SIGTERM、キャンセルは新規リクエストの受付を止め、処理中のものを待ちます。既定のシャットダウンタイムアウトは 30 秒です。2 回目のシグナルはプロセスを即座に終了します。
 
 ### HTTP/2 と HTTP/3
 
-証明書がない場合、既定は HTTP/1.1 です。平文の HTTP/2 には `MiyaProtocols.Http2` を選びます。
+証明書がない場合、既定は HTTP/1.1 です。平文の HTTP/2 には `Protocols.Http2` を選びます。
 
 ```csharp
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
-    Protocols = MiyaProtocols.Http2,
+    Protocols = Protocols.Http2,
 });
 ```
 
@@ -321,7 +321,7 @@ using System.Security.Cryptography.X509Certificates;
 
 using var certificate = X509CertificateLoader.LoadPkcs12FromFile("server.pfx", "certificate-password");
 
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
     Certificate = certificate,
 });
@@ -330,10 +330,10 @@ await app.RunAsync(new MiyaOptions
 HTTP/3 は opt-in で、証明書が必要です。HTTP/1.1 と HTTP/2 を残したまま `Http3` フラグを追加すると、クライアントは Kestrel の `Alt-Svc` レスポンスヘッダーから HTTP/3 を発見できます。
 
 ```csharp
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
     Certificate = certificate,
-    Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+    Protocols = Protocols.Http1AndHttp2AndHttp3,
 });
 ```
 
@@ -341,9 +341,9 @@ HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起�
 
 ### Kestrel の高度な設定
 
-`ConfigureKestrel` は、他の対応する Kestrel 設定に届きます。証明書の指定は `MiyaOptions.Certificate` に置きます。Miya は開発用証明書を探したり、Kestrel のエンドポイント設定ファイルを読んだりはしません。
+`ConfigureKestrel` は、他の対応する Kestrel 設定に届きます。証明書の指定は `Options.Certificate` に置きます。Miya は開発用証明書を探したり、Kestrel のエンドポイント設定ファイルを読んだりはしません。
 
-`MiyaOptions.ConfigureServices` は、内部の Kestrel ホストに追加のサービスを登録します。Miya が依存性注入を必要とすることはありません。このフックは Kestrel を高度にカスタマイズするためだけのものです。設定すると、平文のエンドポイントでもサービス経由のホスティングパスを使います。登録したサービスはサーバー内部に留まり、ハンドラーやミドルウェアには届きません。
+`Options.ConfigureServices` は、内部の Kestrel ホストに追加のサービスを登録します。Miya が依存性注入を必要とすることはありません。このフックは Kestrel を高度にカスタマイズするためだけのものです。設定すると、平文のエンドポイントでもサービス経由のホスティングパスを使います。登録したサービスはサーバー内部に留まり、ハンドラーやミドルウェアには届きません。
 
 ## 計測結果
 
@@ -360,9 +360,9 @@ HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起�
 
 起動のサンプルは 21.598、9.278、8.435、8.452、8.848、8.710、7.641、8.389、7.446、8.114 ms でした。各回は新しい loopback ポートで新しい NativeAOT プロセスを起動し、HTTP レスポンスを受け取り終えてから停止しました。
 
-### MiyaJson と System.Text.Json
+### Json と System.Text.Json
 
-シリアライザーの計測は 2026-08-28 に、上記の Apple M5、macOS arm64、.NET 10 環境で取り直しました。シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `MiyaJson.Serialize` と `MiyaJson.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
+シリアライザーの計測は 2026-08-28 に、上記の Apple M5、macOS arm64、.NET 10 環境で取り直しました。シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
 
 両方のシリアライザーは再利用した `IBufferWriter<byte>` に書き込みました。System.Text.Json は source generation、camelCase 命名、`UnsafeRelaxedJsonEscaping`、required メンバー検査、nullable 注釈検査を使いました。リクエスト JSON は計測区間の前に用意し、両シリアライザーが required プロパティの欠落と非 nullable プロパティへの null をどちらも拒否することを setup で確認しました。バッファ拡張のケースは各操作の中で 16 バイトのバッファを作りました。
 

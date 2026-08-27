@@ -44,7 +44,7 @@ public sealed class KestrelIntegrationTests
         app.Get("/", context => context.Text("Hello"));
 
         var configured = false;
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
@@ -220,7 +220,7 @@ public sealed class KestrelIntegrationTests
             await context.Text("unreachable");
         });
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             MaxRequestBodyBytes = 4,
@@ -254,7 +254,7 @@ public sealed class KestrelIntegrationTests
             return context.Text(body);
         });
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             MaxBufferedResponseBytes = 32,
@@ -463,10 +463,10 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
-            Protocols = MiyaProtocols.Http2,
+            Protocols = Protocols.Http2,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
         using var client = CreateClient(server);
@@ -485,7 +485,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             Certificate = certificate,
@@ -514,7 +514,7 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             Certificate = certificate,
@@ -539,11 +539,11 @@ public sealed class KestrelIntegrationTests
         var app = new App();
         app.Get("/", context => context.Text("Hello"));
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             Certificate = certificate,
-            Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+            Protocols = Protocols.Http1AndHttp2AndHttp3,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
         using var client = CreateTlsClient(server);
@@ -610,10 +610,10 @@ public sealed class KestrelIntegrationTests
             await context.Text("done");
         });
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
-            Protocols = MiyaProtocols.Http2,
+            Protocols = Protocols.Http2,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
         using var client = CreateClient(server);
@@ -655,7 +655,7 @@ public sealed class KestrelIntegrationTests
 
         await Assert.ThrowsAnyAsync<IOException>(async () =>
         {
-            await app.StartAsync(new MiyaOptions { Port = port });
+            await app.StartAsync(new Options { Port = port });
         });
     }
 
@@ -678,13 +678,13 @@ public sealed class KestrelIntegrationTests
     public async Task EnvironmentPortIsUsedWhenOptionIsOmitted()
     {
         var previousPort = Environment.GetEnvironmentVariable("PORT");
-        MiyaServer? server = null;
+        Server? server = null;
         try
         {
             Environment.SetEnvironmentVariable("PORT", "0");
             var app = new App();
             app.Get("/", context => context.Text("Hello"));
-            server = await app.StartAsync(new MiyaOptions
+            server = await app.StartAsync(new Options
             {
                 ShutdownTimeout = TimeSpan.FromSeconds(2),
             });
@@ -725,20 +725,20 @@ public sealed class KestrelIntegrationTests
         return bufferField.GetValue(writer) is byte[] buffer ? buffer.Length : 0;
     }
 
-    private static Task<MiyaServer> StartAsync(App app) => app.StartAsync(
-        new MiyaOptions
+    private static Task<Server> StartAsync(App app) => app.StartAsync(
+        new Options
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
 
-    private static HttpClient CreateClient(MiyaServer server) => new()
+    private static HttpClient CreateClient(Server server) => new()
     {
         BaseAddress = new Uri(server.Addresses[0]),
         Timeout = OperationTimeout,
     };
 
-    private static HttpClient CreateTlsClient(MiyaServer server)
+    private static HttpClient CreateTlsClient(Server server)
     {
         var handler = new HttpClientHandler
         {

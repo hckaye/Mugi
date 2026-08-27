@@ -134,7 +134,7 @@ app.Use(static async (c, next) =>
 
 ## Returning and reading JSON
 
-Miya reads and writes JSON with its own serializer, MiyaJson. In the common case you configure nothing: return an object and Miya writes it as JSON.
+Miya reads and writes JSON with its own serializer, Json. In the common case you configure nothing: return an object and Miya writes it as JSON.
 
 ```csharp
 app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
@@ -158,28 +158,28 @@ Interfaces, `object`, polymorphic types, class inheritance, anonymous types, pri
 
 ### Types reached only through generics
 
-The generator finds types at the call sites it can read. If a type is serialized only through generic code, no call site names it directly, so the generator cannot see it. Mark such a type once with `MiyaJson.Include<T>()`:
+The generator finds types at the call sites it can read. If a type is serialized only through generic code, no call site names it directly, so the generator cannot see it. Mark such a type once with `Json.Include<T>()`:
 
 ```csharp
-MiyaJson.Include<User>();
+Json.Include<User>();
 ```
 
 ### Writing a codec by hand
 
-A codec is the small class that reads and writes one type as JSON. The generator writes one codec per supported type for you. When you need a type the generator does not support, or a specific JSON shape, write a codec by implementing `IMiyaJsonCodec<T>` and register it with `MiyaJson.Register`. A registered codec is used everywhere that type is serialized, including direct `c.Json` calls.
+A codec is the small class that reads and writes one type as JSON. The generator writes one codec per supported type for you. When you need a type the generator does not support, or a specific JSON shape, write a codec by implementing `IJsonCodec<T>` and register it with `Json.Register`. A registered codec is used everywhere that type is serialized, including direct `c.Json` calls.
 
 ```csharp
 using Miya.Json;
 
-MiyaJson.Register(UserCodec.Instance);
+Json.Register(UserCodec.Instance);
 
 internal sealed record User(int Id, string Name);
 
-internal sealed class UserCodec : IMiyaJsonCodec<User>
+internal sealed class UserCodec : IJsonCodec<User>
 {
     public static UserCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, User? value)
+    public void Write(ref JsonWriter writer, User? value)
     {
         if (value is null)
         {
@@ -194,7 +194,7 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
         writer.WriteRaw("}"u8);
     }
 
-    public User? Read(ref MiyaJsonReader reader)
+    public User? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -214,7 +214,7 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
             else if (property.SequenceEqual("name"u8))
             {
                 name = reader.ReadString()
-                    ?? throw new MiyaJsonException("The name cannot be null.");
+                    ?? throw new JsonException("The name cannot be null.");
             }
             else
             {
@@ -229,21 +229,21 @@ internal sealed class UserCodec : IMiyaJsonCodec<User>
 
 ### Limits for untrusted input
 
-MiyaJson enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `MiyaOptions` and `MiyaJsonOptions`.
+Json enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `Options` and `JsonOptions`.
 
 | Setting | Default |
 | --- | ---: |
-| JSON request body, `MiyaOptions.MaxJsonBodyBytes` | 1 MiB |
+| JSON request body, `Options.MaxJsonBodyBytes` | 1 MiB |
 | Complete JSON document, `MaxDocumentByteLength` | 1 MiB |
 | Object and array depth, `MaxDepth` | 64 |
 | One string token, `MaxStringByteLength` | 1 MiB |
 | Members in one object or elements in one array, `MaxCollectionSize` | 1,048,576 |
 | Digits in one number, `MaxNumberDigits` | 128 |
-| Retained MiyaJson temporary buffer, `MaxPooledBufferByteLength` | 64 KiB |
-| Buffered response, `MiyaOptions.MaxBufferedResponseBytes` | 1 MiB |
-| Request body, `MiyaOptions.MaxRequestBodyBytes` | 30 MiB |
+| Retained Json temporary buffer, `MaxPooledBufferByteLength` | 64 KiB |
+| Buffered response, `Options.MaxBufferedResponseBytes` | 1 MiB |
+| Request body, `Options.MaxRequestBodyBytes` | 30 MiB |
 
-NaN and Infinity are rejected by default. `MiyaJsonOptions` also carries a cancellation token for long serialization and parsing.
+NaN and Infinity are rejected by default. `JsonOptions` also carries a cancellation token for long serialization and parsing.
 
 As a build-time optimization, Miya replaces the `c.Json` and route calls it recognizes with direct calls into the generated code, using a C# feature called interceptors. This changes nothing you observe: serialization and routing behave the same whether or not a call was replaced, and a call that the generator cannot see still works as long as a codec is registered.
 
@@ -295,20 +295,20 @@ A derived context is created fresh for each request. If you want it pooled and r
 
 ## Hosting
 
-`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified so the `PORT` environment variable applies; `Run(8080)` chooses the port explicitly. `RunAsync(options, ct)` and `StartAsync(options, ct)` host asynchronously; `StartAsync` returns a `MiyaServer` with the bound addresses and a `StopAsync` method. Port 0 asks the operating system for a free port.
+`Run(int? port = null)` starts a loopback HTTP/1.1 listener and blocks until cancellation or a termination signal. `Run()` leaves the port unspecified so the `PORT` environment variable applies; `Run(8080)` chooses the port explicitly. `RunAsync(options, ct)` and `StartAsync(options, ct)` host asynchronously; `StartAsync` returns a `Server` with the bound addresses and a `StopAsync` method. Port 0 asks the operating system for a free port.
 
-Port selection uses the explicit `Run(port)` value first, then `MiyaOptions.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
+Port selection uses the explicit `Run(port)` value first, then `Options.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
 
 SIGINT, SIGTERM, and cancellation stop accepting new requests and wait for the ones in flight, with a 30 second shutdown timeout by default. A second signal ends the process immediately.
 
 ### HTTP/2 and HTTP/3
 
-Without a certificate the default is HTTP/1.1. Select `MiyaProtocols.Http2` for cleartext HTTP/2:
+Without a certificate the default is HTTP/1.1. Select `Protocols.Http2` for cleartext HTTP/2:
 
 ```csharp
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
-    Protocols = MiyaProtocols.Http2,
+    Protocols = Protocols.Http2,
 });
 ```
 
@@ -321,7 +321,7 @@ using System.Security.Cryptography.X509Certificates;
 
 using var certificate = X509CertificateLoader.LoadPkcs12FromFile("server.pfx", "certificate-password");
 
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
     Certificate = certificate,
 });
@@ -330,10 +330,10 @@ await app.RunAsync(new MiyaOptions
 HTTP/3 is opt-in and needs a certificate. Add the `Http3` flag while keeping HTTP/1.1 and HTTP/2 so clients can discover HTTP/3 from Kestrel's `Alt-Svc` response header:
 
 ```csharp
-await app.RunAsync(new MiyaOptions
+await app.RunAsync(new Options
 {
     Certificate = certificate,
-    Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+    Protocols = Protocols.Http1AndHttp2AndHttp3,
 });
 ```
 
@@ -341,9 +341,9 @@ Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `Qui
 
 ### Advanced Kestrel settings
 
-`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `MiyaOptions.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
+`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `Options.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
 
-`MiyaOptions.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
+`Options.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
 
 ## Measured results
 
@@ -360,9 +360,9 @@ Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, m
 
 The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389, 7.446, and 8.114 ms. Each run started a new NativeAOT process on a new loopback port and stopped it after receiving the complete HTTP response.
 
-### MiyaJson and System.Text.Json
+### Json and System.Text.Json
 
-The serializer measurements were repeated on 2026-08-28 using the Apple M5, macOS arm64, and .NET 10 environment listed above. The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `MiyaJson.Serialize` and `MiyaJson.Deserialize` overloads. No benchmark-specific codecs were used.
+The serializer measurements were repeated on 2026-08-28 using the Apple M5, macOS arm64, and .NET 10 environment listed above. The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `Json.Serialize` and `Json.Deserialize` overloads. No benchmark-specific codecs were used.
 
 Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, `UnsafeRelaxedJsonEscaping`, required-member checks, and nullable-annotation checks. Request JSON was prepared before the measured interval, and setup verified that both serializers rejected a missing required property and a null value for its non-nullable property. The buffer-growth case created a 16-byte buffer inside each operation.
 

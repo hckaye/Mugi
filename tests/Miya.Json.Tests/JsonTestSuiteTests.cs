@@ -7,7 +7,7 @@ public sealed class JsonTestSuiteTests
     public void RequiredAcceptedDocumentsParse(string path)
     {
         var json = File.ReadAllBytes(path);
-        Assert.True(MiyaJson.Deserialize(json, SkipCodec.Instance));
+        Assert.True(Json.Deserialize(json, SkipCodec.Instance));
     }
 
     [Theory]
@@ -15,7 +15,7 @@ public sealed class JsonTestSuiteTests
     public void RequiredRejectedDocumentsFail(string path)
     {
         var json = File.ReadAllBytes(path);
-        Assert.Throws<MiyaJsonException>(() => MiyaJson.Deserialize(json, SkipCodec.Instance));
+        Assert.Throws<JsonException>(() => Json.Deserialize(json, SkipCodec.Instance));
     }
 
     public static TheoryData<string> AcceptedDocuments => Load("y_*.json");

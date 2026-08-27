@@ -1,12 +1,12 @@
 namespace Miya.Json;
 
 /// <summary>
-/// Limits and behavior switches for MiyaJson. Instances are immutable; the defaults are
+/// Limits and behavior switches for Json. Instances are immutable; the defaults are
 /// safe for untrusted input.
 /// </summary>
-public sealed class MiyaJsonOptions
+public sealed class JsonOptions
 {
-    public static MiyaJsonOptions Default { get; } = new();
+    public static JsonOptions Default { get; } = new();
 
     /// <summary>Maximum length in bytes of a complete JSON document.</summary>
     public int MaxDocumentByteLength { get; init; } = 1024 * 1024;

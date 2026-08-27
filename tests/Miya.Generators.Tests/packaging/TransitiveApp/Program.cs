@@ -5,8 +5,8 @@ using Miya;
 using Miya.Json;
 
 var buffer = new ArrayBufferWriter<byte>();
-MiyaJson.Serialize(buffer, new TransitivePayload(2, "transitive"));
-var copy = MiyaJson.Deserialize<TransitivePayload>(buffer.WrittenSpan)!;
+Json.Serialize(buffer, new TransitivePayload(2, "transitive"));
+var copy = Json.Deserialize<TransitivePayload>(buffer.WrittenSpan)!;
 var app = new App();
 app.Post("/transitive", context => context.Text("ok"));
 app.Build();

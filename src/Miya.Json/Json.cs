@@ -2,27 +2,27 @@ using System.Buffers;
 
 namespace Miya.Json;
 
-/// <summary>Entry points for MiyaJson serialization and codec registration.</summary>
-public static class MiyaJson
+/// <summary>Entry points for Json serialization and codec registration.</summary>
+public static class Json
 {
     /// <summary>Registers the codec used for <typeparamref name="T"/>. Last registration wins.</summary>
-    public static void Register<T>(IMiyaJsonCodec<T> codec)
+    public static void Register<T>(IJsonCodec<T> codec)
     {
         ArgumentNullException.ThrowIfNull(codec);
         Registry<T>.Instance = codec;
     }
 
     /// <summary>Returns the registered codec for <typeparamref name="T"/>, or null.</summary>
-    public static IMiyaJsonCodec<T>? TryGetCodec<T>() => Registry<T>.Instance;
+    public static IJsonCodec<T>? TryGetCodec<T>() => Registry<T>.Instance;
 
     /// <summary>Returns the registered codec for <typeparamref name="T"/>, or throws.</summary>
-    public static IMiyaJsonCodec<T> GetCodec<T>() => Registry<T>.Instance ?? throw MissingCodec<T>();
+    public static IJsonCodec<T> GetCodec<T>() => Registry<T>.Instance ?? throw MissingCodec<T>();
 
     /// <summary>
     /// Returns the registered codec for <typeparamref name="T"/> when one is available;
     /// otherwise returns the generated codec supplied by an intercepted call site.
     /// </summary>
-    public static IMiyaJsonCodec<T> ResolveCodec<T>(IMiyaJsonCodec<T> generated)
+    public static IJsonCodec<T> ResolveCodec<T>(IJsonCodec<T> generated)
     {
         ArgumentNullException.ThrowIfNull(generated);
         var registered = Registry<T>.Instance;
@@ -39,9 +39,9 @@ public static class MiyaJson
     }
 
     /// <summary>Serializes <paramref name="value"/> as UTF-8 JSON into <paramref name="destination"/>.</summary>
-    public static void Serialize<T>(IBufferWriter<byte> destination, T value, MiyaJsonOptions? options = null)
+    public static void Serialize<T>(IBufferWriter<byte> destination, T value, JsonOptions? options = null)
     {
-        var writer = new MiyaJsonWriter(destination, options ?? MiyaJsonOptions.Default);
+        var writer = new JsonWriter(destination, options ?? JsonOptions.Default);
         GetCodec<T>().Write(ref writer, value);
         writer.Flush();
     }
@@ -50,19 +50,19 @@ public static class MiyaJson
     public static void Serialize<T>(
         IBufferWriter<byte> destination,
         T value,
-        IMiyaJsonCodec<T> codec,
-        MiyaJsonOptions? options = null)
+        IJsonCodec<T> codec,
+        JsonOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(codec);
-        var writer = new MiyaJsonWriter(destination, options ?? MiyaJsonOptions.Default);
+        var writer = new JsonWriter(destination, options ?? JsonOptions.Default);
         codec.Write(ref writer, value);
         writer.Flush();
     }
 
     /// <summary>Deserializes <typeparamref name="T"/> from a complete UTF-8 JSON document.</summary>
-    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json, MiyaJsonOptions? options = null)
+    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json, JsonOptions? options = null)
     {
-        var reader = new MiyaJsonReader(utf8Json, options ?? MiyaJsonOptions.Default);
+        var reader = new JsonReader(utf8Json, options ?? JsonOptions.Default);
         try
         {
             var value = GetCodec<T>().Read(ref reader);
@@ -78,11 +78,11 @@ public static class MiyaJson
     /// <summary>Deserializes with an explicitly supplied codec.</summary>
     public static T? Deserialize<T>(
         ReadOnlySpan<byte> utf8Json,
-        IMiyaJsonCodec<T> codec,
-        MiyaJsonOptions? options = null)
+        IJsonCodec<T> codec,
+        JsonOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(codec);
-        var reader = new MiyaJsonReader(utf8Json, options ?? MiyaJsonOptions.Default);
+        var reader = new JsonReader(utf8Json, options ?? JsonOptions.Default);
         try
         {
             var value = codec.Read(ref reader);
@@ -95,13 +95,13 @@ public static class MiyaJson
         }
     }
 
-    private static MiyaJsonException MissingCodec<T>() => new(
-        $"No MiyaJson codec is registered for '{typeof(T)}'. Reference the Miya source generator " +
-        $"(or run miya-gen) so a codec is generated, add MiyaJson.Include<{typeof(T).Name}>() if the " +
-        "type only appears through generic code, or register a hand-written codec with MiyaJson.Register.");
+    private static JsonException MissingCodec<T>() => new(
+        $"No Json codec is registered for '{typeof(T)}'. Reference the Miya source generator " +
+        $"(or run miya-gen) so a codec is generated, add Json.Include<{typeof(T).Name}>() if the " +
+        "type only appears through generic code, or register a hand-written codec with Json.Register.");
 
     private static class Registry<T>
     {
-        public static IMiyaJsonCodec<T>? Instance;
+        public static IJsonCodec<T>? Instance;
     }
 }

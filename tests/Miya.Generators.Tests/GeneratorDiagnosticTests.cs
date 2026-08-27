@@ -51,19 +51,19 @@ public sealed class GeneratorDiagnosticTests
         const string source = """
             using System.Buffers;
             using Miya.Json;
-            internal sealed class ObjectCodec : IMiyaJsonCodec<object>
+            internal sealed class ObjectCodec : IJsonCodec<object>
             {
                 internal static readonly ObjectCodec Instance = new();
-                public void Write(ref MiyaJsonWriter writer, object? value) => writer.WriteNull();
-                public object? Read(ref MiyaJsonReader reader) { reader.TryReadNull(); return null; }
+                public void Write(ref JsonWriter writer, object? value) => writer.WriteNull();
+                public object? Read(ref JsonReader reader) { reader.TryReadNull(); return null; }
             }
             internal static class Calls
             {
                 internal static void Run()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize<object>(buffer, new object(), ObjectCodec.Instance);
-                    MiyaJson.Deserialize<object>("null"u8, ObjectCodec.Instance);
+                    Json.Serialize<object>(buffer, new object(), ObjectCodec.Instance);
+                    Json.Deserialize<object>("null"u8, ObjectCodec.Instance);
                 }
             }
             """;

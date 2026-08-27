@@ -60,7 +60,7 @@ public sealed class ResponseTests
 
         await using var response = await TestApp.Send(
             app,
-            options: new MiyaOptions { MaxBufferedResponseBytes = 4 });
+            options: new Options { MaxBufferedResponseBytes = 4 });
 
         Assert.True(headerWasRejected);
         Assert.True(response.ResponseBody.Completed);

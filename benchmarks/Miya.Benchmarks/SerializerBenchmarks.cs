@@ -126,7 +126,7 @@ public class SerializerBenchmarks
     public int IntegersStj() => SerializeStj(_integers, _context.IntegerPayload);
 
     [BenchmarkCategory("Request bind"), Benchmark]
-    public RequestDto RequestBindMiya() => MiyaJson.Deserialize<RequestDto>(_requestJson)!;
+    public RequestDto RequestBindMiya() => global::Miya.Json.Json.Deserialize<RequestDto>(_requestJson)!;
 
     [BenchmarkCategory("Request bind"), Benchmark(Baseline = true)]
     public RequestDto RequestBindStj() => JsonSerializer.Deserialize(_requestJson, _context.RequestDto)!;
@@ -135,7 +135,7 @@ public class SerializerBenchmarks
     public int BufferGrowthMiya()
     {
         var buffer = new ArrayBufferWriter<byte>(16);
-        MiyaJson.Serialize(buffer, _longString);
+        global::Miya.Json.Json.Serialize(buffer, _longString);
         return buffer.WrittenCount;
     }
 
@@ -152,7 +152,7 @@ public class SerializerBenchmarks
     private int SerializeMiya<T>(T value)
     {
         _miyaBuffer.Clear();
-        MiyaJson.Serialize(_miyaBuffer, value);
+        global::Miya.Json.Json.Serialize(_miyaBuffer, value);
         return _miyaBuffer.WrittenCount;
     }
 
@@ -169,7 +169,7 @@ public class SerializerBenchmarks
     {
         var miya = new ArrayBufferWriter<byte>();
         var stj = new ArrayBufferWriter<byte>();
-        MiyaJson.Serialize(miya, value);
+        global::Miya.Json.Json.Serialize(miya, value);
         using (var writer = new Utf8JsonWriter(stj, new JsonWriterOptions
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -188,13 +188,13 @@ public class SerializerBenchmarks
 
     private static void IncludeGeneratedCodecs()
     {
-        MiyaJson.Include<SmallDto>();
+        global::Miya.Json.Json.Include<SmallDto>();
         // STJ does not enforce nullable annotations for collection elements, so match that contract.
-        MiyaJson.Include<List<ItemDto?>>();
-        MiyaJson.Include<NestedDto>();
-        MiyaJson.Include<string>();
-        MiyaJson.Include<IntegerPayload>();
-        MiyaJson.Include<RequestDto>();
+        global::Miya.Json.Json.Include<List<ItemDto?>>();
+        global::Miya.Json.Json.Include<NestedDto>();
+        global::Miya.Json.Json.Include<string>();
+        global::Miya.Json.Json.Include<IntegerPayload>();
+        global::Miya.Json.Json.Include<RequestDto>();
     }
 
     private void ValidateInputContracts()
@@ -213,9 +213,9 @@ public class SerializerBenchmarks
     {
         try
         {
-            _ = MiyaJson.Deserialize<RequestDto>(json);
+            _ = global::Miya.Json.Json.Deserialize<RequestDto>(json);
         }
-        catch (MiyaJsonException exception) when (exception.IsInputError)
+        catch (global::Miya.Json.JsonException exception) when (exception.IsInputError)
         {
             return;
         }
@@ -229,7 +229,7 @@ public class SerializerBenchmarks
         {
             _ = JsonSerializer.Deserialize(json, _context.RequestDto);
         }
-        catch (JsonException)
+        catch (global::System.Text.Json.JsonException)
         {
             return;
         }

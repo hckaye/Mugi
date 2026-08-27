@@ -8,7 +8,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Miya.Generators.Core;
 
-public static class MiyaGeneratorCore
+public static class GeneratorCore
 {
     public static GenerationResult Generate(
         Compilation compilation,
@@ -258,7 +258,7 @@ public static class MiyaGeneratorCore
 
     private static bool ValidateJsonNames(
         JsonTypeGraph graph,
-        MiyaJsonNaming naming,
+        JsonNaming naming,
         out string? error)
     {
         foreach (var model in graph.Models)

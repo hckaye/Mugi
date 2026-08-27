@@ -1,25 +1,25 @@
 namespace Miya.Json;
 
 /// <summary>Thrown for invalid JSON input, exceeded limits, or missing codecs.</summary>
-public sealed class MiyaJsonException : Exception
+public sealed class JsonException : Exception
 {
-    public MiyaJsonException(string message)
+    public JsonException(string message)
         : base(message)
     {
     }
 
-    public MiyaJsonException(string message, Exception innerException)
+    public JsonException(string message, Exception innerException)
         : base(message, innerException)
     {
     }
 
-    public MiyaJsonException(string message, bool isInputError)
+    public JsonException(string message, bool isInputError)
         : base(message)
     {
         IsInputError = isInputError;
     }
 
-    public MiyaJsonException(string message, Exception innerException, bool isInputError)
+    public JsonException(string message, Exception innerException, bool isInputError)
         : base(message, innerException)
     {
         IsInputError = isInputError;

@@ -47,7 +47,7 @@ internal static class RouteAndInterceptorEmitter
         var writer = new CodeWriter();
         EmitInterceptsLocationAttribute(writer);
         writer.Open("namespace Miya.Generated");
-        writer.Open("internal static partial class MiyaInterceptors");
+        writer.Open("internal static partial class Interceptors");
 
         var ordered = analyses
             .Where(static analysis =>
@@ -90,7 +90,7 @@ internal static class RouteAndInterceptorEmitter
     internal static string EmitInterceptor(InvocationAnalysis analysis, JsonTypeModel? model)
     {
         var writer = StartFile();
-        writer.Open("internal static partial class MiyaInterceptors");
+        writer.Open("internal static partial class Interceptors");
         var suffix = InterceptorKey(analysis);
         if (analysis.InterceptJson && model is not null)
         {
@@ -150,7 +150,7 @@ internal static class RouteAndInterceptorEmitter
         writer.Line(
             "    => receiver.Json<" + TypeNames.NonNullableDisplay(typeArgument) + ">(value" +
             (forgiveNull ? "!" : string.Empty) +
-            ", global::Miya.Json.MiyaJson.ResolveCodec<" + TypeNames.NonNullableDisplay(typeArgument) + ">(" +
+            ", global::Miya.Json.Json.ResolveCodec<" + TypeNames.NonNullableDisplay(typeArgument) + ">(" +
             TypeNames.CodecName(model.Type) + ".Instance));");
     }
 

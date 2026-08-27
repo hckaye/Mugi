@@ -33,7 +33,7 @@ internal static class GeneratorTestHelper
         bool trackSteps = false)
     {
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [new MiyaIncrementalGenerator().AsSourceGenerator()],
+            [new IncrementalGenerator().AsSourceGenerator()],
             parseOptions: ParseOptions,
             optionsProvider: new TestAnalyzerConfigOptionsProvider(naming),
             driverOptions: new GeneratorDriverOptions(
@@ -61,7 +61,7 @@ internal static class GeneratorTestHelper
             .Concat(
             [
                 typeof(Miya.App).Assembly.Location,
-                typeof(Miya.Json.MiyaJson).Assembly.Location,
+                typeof(Miya.Json.Json).Assembly.Location,
             ])
             .Distinct(StringComparer.Ordinal);
         return paths.Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToImmutableArray();

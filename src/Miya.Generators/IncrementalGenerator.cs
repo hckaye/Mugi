@@ -10,7 +10,7 @@ using Miya.Generators.Core;
 namespace Miya.Generators;
 
 [Generator(LanguageNames.CSharp)]
-public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
+public sealed class IncrementalGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -49,7 +49,7 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
                 var jsonAnalyses = pair.Left
                     .Select(static candidate => candidate.Analysis)
                     .ToImmutableArray();
-                return MiyaGeneratorCore.GenerateIncrementalJsonSources(jsonAnalyses, pair.Right);
+                return GeneratorCore.GenerateIncrementalJsonSources(jsonAnalyses, pair.Right);
             })
             .WithComparer(GeneratedSourceComparer.Instance)
             .WithTrackingName("MiyaJsonSources");
@@ -62,7 +62,7 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
             .WithTrackingName("MiyaRoutes");
         var routeSources = routes.Collect()
             .SelectMany(static (routeAnalyses, _) =>
-                MiyaGeneratorCore.GenerateIncrementalRouteSources(routeAnalyses))
+                GeneratorCore.GenerateIncrementalRouteSources(routeAnalyses))
             .WithComparer(GeneratedSourceComparer.Instance)
             .WithTrackingName("MiyaRouteSources");
         context.RegisterSourceOutput(
@@ -71,7 +71,7 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
 
         var interceptorSources = analyses.Combine(settings)
             .Select(static (pair, _) =>
-                MiyaGeneratorCore.GenerateIncrementalInterceptorSource(pair.Left, pair.Right))
+                GeneratorCore.GenerateIncrementalInterceptorSource(pair.Left, pair.Right))
             .Where(static source => source is not null)
             .Select(static (source, _) => source!)
             .WithComparer(GeneratedSourceComparer.Instance)
@@ -82,7 +82,7 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
 
         var callSiteDiagnostics = analyses.Combine(settings)
             .Select(static (pair, _) =>
-                MiyaGeneratorCore.GenerateCallSiteDiagnostics(pair.Left, pair.Right))
+                GeneratorCore.GenerateCallSiteDiagnostics(pair.Left, pair.Right))
             .WithTrackingName("MiyaCallSiteDiagnostics");
         context.RegisterSourceOutput(
             callSiteDiagnostics,
@@ -96,7 +96,7 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
 
         var duplicateRouteDiagnostics = routes.Collect()
             .Select(static (routeAnalyses, _) =>
-                MiyaGeneratorCore.GenerateDuplicateRouteDiagnostics(routeAnalyses))
+                GeneratorCore.GenerateDuplicateRouteDiagnostics(routeAnalyses))
             .WithTrackingName("MiyaDuplicateRouteDiagnostics");
         context.RegisterSourceOutput(
             duplicateRouteDiagnostics,
@@ -114,10 +114,10 @@ public sealed class MiyaIncrementalGenerator : IIncrementalGenerator
         if (options.TryGetValue("build_property.MiyaJsonNaming", out var naming)
             && string.Equals(naming, "PascalCase", StringComparison.OrdinalIgnoreCase))
         {
-            return new GeneratorSettings(MiyaJsonNaming.PascalCase, emitInterceptors: true);
+            return new GeneratorSettings(JsonNaming.PascalCase, emitInterceptors: true);
         }
 
-        return new GeneratorSettings(MiyaJsonNaming.CamelCase, emitInterceptors: true);
+        return new GeneratorSettings(JsonNaming.CamelCase, emitInterceptors: true);
     }
 
     private static void AddSource(SourceProductionContext context, GeneratedSource source)

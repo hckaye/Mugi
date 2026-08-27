@@ -33,7 +33,7 @@ public sealed class GeneratorSnapshotTests
             }
             internal static class Marker
             {
-                internal static void Include() => MiyaJson.Include<Payload>();
+                internal static void Include() => Json.Include<Payload>();
             }
             """;
 
@@ -52,7 +52,7 @@ public sealed class GeneratorSnapshotTests
         Assert.Contains("reader.SkipValue();", codecs, StringComparison.Ordinal);
         Assert.Contains("writer.WriteRaw(\"{\\\"name\\\":\"u8);", codecs, StringComparison.Ordinal);
         Assert.Contains("global::System.Collections.Generic.Dictionary", codecs, StringComparison.Ordinal);
-        Assert.Contains("MiyaJsonGeneratedRegistration", codecs, StringComparison.Ordinal);
+        Assert.Contains("JsonGeneratedRegistration", codecs, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class GeneratorSnapshotTests
         const string source = """
             using Miya.Json;
             internal sealed record Payload(int UserId);
-            internal static class Marker { internal static void Include() => MiyaJson.Include<Payload>(); }
+            internal static class Marker { internal static void Include() => Json.Include<Payload>(); }
             """;
 
         var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source), "PascalCase");

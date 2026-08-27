@@ -1,22 +1,22 @@
 namespace Miya.Tests;
 
-public sealed class MiyaOptionsTests
+public sealed class OptionsTests
 {
     [Fact]
     public void CleartextDefaultsToHttp1()
     {
-        var options = new MiyaOptions();
+        var options = new Options();
 
-        Assert.Equal(MiyaProtocols.Http1, options.Protocols);
+        Assert.Equal(Protocols.Http1, options.Protocols);
         options.Validate();
     }
 
     [Fact]
     public void CleartextHttp2IsValid()
     {
-        var options = new MiyaOptions
+        var options = new Options
         {
-            Protocols = MiyaProtocols.Http2,
+            Protocols = Protocols.Http2,
         };
 
         options.Validate();
@@ -25,9 +25,9 @@ public sealed class MiyaOptionsTests
     [Fact]
     public void CleartextHttp1AndHttp2IsRejected()
     {
-        var options = new MiyaOptions
+        var options = new Options
         {
-            Protocols = MiyaProtocols.Http1AndHttp2,
+            Protocols = Protocols.Http1AndHttp2,
         };
 
         var exception = Assert.Throws<InvalidOperationException>(options.Validate);
@@ -37,9 +37,9 @@ public sealed class MiyaOptionsTests
     [Fact]
     public void Http3WithoutCertificateIsRejected()
     {
-        var options = new MiyaOptions
+        var options = new Options
         {
-            Protocols = MiyaProtocols.Http1AndHttp2AndHttp3,
+            Protocols = Protocols.Http1AndHttp2AndHttp3,
         };
 
         var exception = Assert.Throws<InvalidOperationException>(options.Validate);
@@ -47,11 +47,11 @@ public sealed class MiyaOptionsTests
     }
 
     [Theory]
-    [InlineData((MiyaProtocols)0)]
-    [InlineData((MiyaProtocols)8)]
-    public void UndefinedProtocolValuesAreRejected(MiyaProtocols protocols)
+    [InlineData((Protocols)0)]
+    [InlineData((Protocols)8)]
+    public void UndefinedProtocolValuesAreRejected(Protocols protocols)
     {
-        var options = new MiyaOptions
+        var options = new Options
         {
             Protocols = protocols,
         };

@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace Miya.Json.Tests;
 
-public sealed class MiyaJsonRuntimeTests
+public sealed class JsonRuntimeTests
 {
     private static readonly JsonSerializerOptions ComparisonOptions = new()
     {
@@ -24,7 +24,7 @@ public sealed class MiyaJsonRuntimeTests
         using var expected = JsonSerializer.SerializeToDocument(value, ComparisonOptions);
         Assert.True(JsonElement.DeepEquals(expected.RootElement, actual.RootElement));
 
-        var roundTrip = MiyaJson.Deserialize(bytes, SampleDtoCodec.Instance);
+        var roundTrip = Json.Deserialize(bytes, SampleDtoCodec.Instance);
         AssertSampleEqual(value, Assert.IsType<SampleDto>(roundTrip));
     }
 
@@ -38,7 +38,7 @@ public sealed class MiyaJsonRuntimeTests
 
         Assert.Contains("<tag>& 'quoted'", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
         Assert.Contains("\\\"slash\\\\ control\\n", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
-        Assert.Equal(value, MiyaJson.Deserialize(bytes, codec));
+        Assert.Equal(value, Json.Deserialize(bytes, codec));
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class MiyaJsonRuntimeTests
             }
             """;
 
-        var value = MiyaJson.Deserialize(Encoding.UTF8.GetBytes(json), SampleDtoCodec.Instance);
+        var value = Json.Deserialize(Encoding.UTF8.GetBytes(json), SampleDtoCodec.Instance);
 
         Assert.NotNull(value);
         Assert.Equal(9, value.Id);
@@ -66,41 +66,41 @@ public sealed class MiyaJsonRuntimeTests
     [Fact]
     public void MissingRequiredPropertyIsRejectedByCodec()
     {
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("{\"id\":1}"u8, SampleDtoCodec.Instance));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("{\"id\":1}"u8, SampleDtoCodec.Instance));
     }
 
     [Theory]
     [MemberData(nameof(InvalidDocuments))]
-    public void InvalidDocumentsThrowMiyaJsonException(byte[] utf8Json)
+    public void InvalidDocumentsThrowJsonException(byte[] utf8Json)
     {
-        Assert.Throws<MiyaJsonException>(() => MiyaJson.Deserialize(utf8Json, SkipCodec.Instance));
+        Assert.Throws<JsonException>(() => Json.Deserialize(utf8Json, SkipCodec.Instance));
     }
 
     [Fact]
     public void ConfiguredDepthLimitIsEnforcedBeforeEnteringTheNextContainer()
     {
-        var options = new MiyaJsonOptions { MaxDepth = 2 };
+        var options = new JsonOptions { MaxDepth = 2 };
 
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("[[[]]]"u8, SkipCodec.Instance, options));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("[[[]]]"u8, SkipCodec.Instance, options));
     }
 
     [Fact]
     public void ConfiguredStringCollectionNumberAndDocumentLimitsAreEnforced()
     {
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("\"abcd\""u8, SkipCodec.Instance,
-                new MiyaJsonOptions { MaxStringByteLength = 3 }));
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("[1,2]"u8, SkipCodec.Instance,
-                new MiyaJsonOptions { MaxCollectionSize = 1 }));
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("1234"u8, SkipCodec.Instance,
-                new MiyaJsonOptions { MaxNumberDigits = 3 }));
-        Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("null"u8, SkipCodec.Instance,
-                new MiyaJsonOptions { MaxDocumentByteLength = 3 }));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("\"abcd\""u8, SkipCodec.Instance,
+                new JsonOptions { MaxStringByteLength = 3 }));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("[1,2]"u8, SkipCodec.Instance,
+                new JsonOptions { MaxCollectionSize = 1 }));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("1234"u8, SkipCodec.Instance,
+                new JsonOptions { MaxNumberDigits = 3 }));
+        Assert.Throws<JsonException>(() =>
+            Json.Deserialize("null"u8, SkipCodec.Instance,
+                new JsonOptions { MaxDocumentByteLength = 3 }));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class MiyaJsonRuntimeTests
     {
         using var source = new CancellationTokenSource();
         source.Cancel();
-        var options = new MiyaJsonOptions
+        var options = new JsonOptions
         {
             CancellationToken = source.Token,
             MaxDepth = 512,
@@ -121,22 +121,22 @@ public sealed class MiyaJsonRuntimeTests
         var number = Encoding.UTF8.GetBytes(new string('1', 32 * 1024));
 
         Assert.Throws<OperationCanceledException>(() =>
-            MiyaJson.Deserialize(collection, SkipCodec.Instance, options));
+            Json.Deserialize(collection, SkipCodec.Instance, options));
         Assert.Throws<OperationCanceledException>(() =>
-            MiyaJson.Deserialize(deep, SkipCodec.Instance, options));
+            Json.Deserialize(deep, SkipCodec.Instance, options));
         Assert.Throws<OperationCanceledException>(() =>
-            MiyaJson.Deserialize(whitespace, SkipCodec.Instance, options));
+            Json.Deserialize(whitespace, SkipCodec.Instance, options));
         Assert.Throws<OperationCanceledException>(() =>
-            MiyaJson.Deserialize(number, SkipCodec.Instance, options));
+            Json.Deserialize(number, SkipCodec.Instance, options));
     }
 
     [Fact]
     public void ExceptionClassificationDistinguishesInputFromCodecConfigurationErrors()
     {
-        var input = Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.Deserialize("[1,]"u8, SkipCodec.Instance));
-        var configuration = Assert.Throws<MiyaJsonException>(() =>
-            MiyaJson.GetCodec<UnregisteredType>());
+        var input = Assert.Throws<JsonException>(() =>
+            Json.Deserialize("[1,]"u8, SkipCodec.Instance));
+        var configuration = Assert.Throws<JsonException>(() =>
+            Json.GetCodec<UnregisteredType>());
 
         Assert.True(input.IsInputError);
         Assert.False(configuration.IsInputError);
@@ -190,12 +190,12 @@ public sealed class MiyaJsonRuntimeTests
     {
         var stringCodec = new DelegateCodec<string>(WriteString, ReadString);
         Assert.Equal(string.Empty, RoundTrip(string.Empty, WriteString, ReadString));
-        Assert.True(MiyaJson.Deserialize("[]"u8, SkipCodec.Instance));
-        Assert.True(MiyaJson.Deserialize("{}"u8, SkipCodec.Instance));
+        Assert.True(Json.Deserialize("[]"u8, SkipCodec.Instance));
+        Assert.True(Json.Deserialize("{}"u8, SkipCodec.Instance));
 
         var node = new RecursiveNode { Value = 1, Next = new RecursiveNode { Value = 2 } };
         var bytes = JsonTestHelpers.Serialize(node, RecursiveNodeCodec.Instance);
-        var result = MiyaJson.Deserialize(bytes, RecursiveNodeCodec.Instance);
+        var result = Json.Deserialize(bytes, RecursiveNodeCodec.Instance);
         Assert.NotNull(result);
         Assert.Equal(1, result.Value);
         Assert.Equal(2, result.Next?.Value);
@@ -207,26 +207,26 @@ public sealed class MiyaJsonRuntimeTests
     public void NonFiniteNumbersAreRejectedByDefaultAndOptionalWhenEnabled()
     {
         var codec = new DelegateCodec<double>(WriteDouble, ReadDouble);
-        Assert.Throws<MiyaJsonException>(() => JsonTestHelpers.Serialize(double.NaN, codec));
-        Assert.Throws<MiyaJsonException>(() => MiyaJson.Deserialize("NaN"u8, codec));
+        Assert.Throws<JsonException>(() => JsonTestHelpers.Serialize(double.NaN, codec));
+        Assert.Throws<JsonException>(() => Json.Deserialize("NaN"u8, codec));
 
-        var options = new MiyaJsonOptions { AllowNonFiniteNumbers = true };
+        var options = new JsonOptions { AllowNonFiniteNumbers = true };
         var bytes = JsonTestHelpers.Serialize(double.NegativeInfinity, codec, options);
         Assert.Equal("-Infinity", Encoding.UTF8.GetString(bytes));
-        Assert.Equal(double.NegativeInfinity, MiyaJson.Deserialize(bytes, codec, options));
+        Assert.Equal(double.NegativeInfinity, Json.Deserialize(bytes, codec, options));
     }
 
     [Fact]
     public void WriterRejectsInvalidUtf16AndConfiguredLimits()
     {
         var codec = new DelegateCodec<string>(WriteString, ReadString);
-        Assert.Throws<MiyaJsonException>(() => JsonTestHelpers.Serialize("\uD800", codec));
-        Assert.Throws<MiyaJsonException>(() => JsonTestHelpers.Serialize("ab", codec, new MiyaJsonOptions
+        Assert.Throws<JsonException>(() => JsonTestHelpers.Serialize("\uD800", codec));
+        Assert.Throws<JsonException>(() => JsonTestHelpers.Serialize("ab", codec, new JsonOptions
         {
             MaxStringByteLength = 1,
             MaxDocumentByteLength = 16,
         }));
-        Assert.Throws<MiyaJsonException>(() => JsonTestHelpers.Serialize<string>(null!, codec, new MiyaJsonOptions
+        Assert.Throws<JsonException>(() => JsonTestHelpers.Serialize<string>(null!, codec, new JsonOptions
         {
             MaxDocumentByteLength = 3,
         }));
@@ -295,29 +295,29 @@ public sealed class MiyaJsonRuntimeTests
     {
         var codec = new DelegateCodec<T>(write, read);
         var bytes = JsonTestHelpers.Serialize(value, codec);
-        return Assert.IsType<T>(MiyaJson.Deserialize(bytes, codec));
+        return Assert.IsType<T>(Json.Deserialize(bytes, codec));
     }
 
-    private static void WriteString(ref MiyaJsonWriter writer, string? value) => writer.WriteString(value);
-    private static string? ReadString(ref MiyaJsonReader reader) => reader.ReadString();
-    private static void WriteInt32(ref MiyaJsonWriter writer, int value) => writer.WriteNumber(value);
-    private static int ReadInt32(ref MiyaJsonReader reader) => reader.ReadInt32();
-    private static void WriteInt64(ref MiyaJsonWriter writer, long value) => writer.WriteNumber(value);
-    private static long ReadInt64(ref MiyaJsonReader reader) => reader.ReadInt64();
-    private static void WriteUInt32(ref MiyaJsonWriter writer, uint value) => writer.WriteNumber(value);
-    private static uint ReadUInt32(ref MiyaJsonReader reader) => reader.ReadUInt32();
-    private static void WriteUInt64(ref MiyaJsonWriter writer, ulong value) => writer.WriteNumber(value);
-    private static ulong ReadUInt64(ref MiyaJsonReader reader) => reader.ReadUInt64();
-    private static void WriteDouble(ref MiyaJsonWriter writer, double value) => writer.WriteNumber(value);
-    private static double ReadDouble(ref MiyaJsonReader reader) => reader.ReadDouble();
-    private static void WriteDecimal(ref MiyaJsonWriter writer, decimal value) => writer.WriteNumber(value);
-    private static decimal ReadDecimal(ref MiyaJsonReader reader) => reader.ReadDecimal();
-    private static void WriteDateTime(ref MiyaJsonWriter writer, DateTime value) => writer.WriteDateTime(value);
-    private static DateTime ReadDateTime(ref MiyaJsonReader reader) => reader.ReadDateTime();
-    private static void WriteDateTimeOffset(ref MiyaJsonWriter writer, DateTimeOffset value) => writer.WriteDateTimeOffset(value);
-    private static DateTimeOffset ReadDateTimeOffset(ref MiyaJsonReader reader) => reader.ReadDateTimeOffset();
-    private static void WriteGuid(ref MiyaJsonWriter writer, Guid value) => writer.WriteGuid(value);
-    private static Guid ReadGuid(ref MiyaJsonReader reader) => reader.ReadGuid();
+    private static void WriteString(ref JsonWriter writer, string? value) => writer.WriteString(value);
+    private static string? ReadString(ref JsonReader reader) => reader.ReadString();
+    private static void WriteInt32(ref JsonWriter writer, int value) => writer.WriteNumber(value);
+    private static int ReadInt32(ref JsonReader reader) => reader.ReadInt32();
+    private static void WriteInt64(ref JsonWriter writer, long value) => writer.WriteNumber(value);
+    private static long ReadInt64(ref JsonReader reader) => reader.ReadInt64();
+    private static void WriteUInt32(ref JsonWriter writer, uint value) => writer.WriteNumber(value);
+    private static uint ReadUInt32(ref JsonReader reader) => reader.ReadUInt32();
+    private static void WriteUInt64(ref JsonWriter writer, ulong value) => writer.WriteNumber(value);
+    private static ulong ReadUInt64(ref JsonReader reader) => reader.ReadUInt64();
+    private static void WriteDouble(ref JsonWriter writer, double value) => writer.WriteNumber(value);
+    private static double ReadDouble(ref JsonReader reader) => reader.ReadDouble();
+    private static void WriteDecimal(ref JsonWriter writer, decimal value) => writer.WriteNumber(value);
+    private static decimal ReadDecimal(ref JsonReader reader) => reader.ReadDecimal();
+    private static void WriteDateTime(ref JsonWriter writer, DateTime value) => writer.WriteDateTime(value);
+    private static DateTime ReadDateTime(ref JsonReader reader) => reader.ReadDateTime();
+    private static void WriteDateTimeOffset(ref JsonWriter writer, DateTimeOffset value) => writer.WriteDateTimeOffset(value);
+    private static DateTimeOffset ReadDateTimeOffset(ref JsonReader reader) => reader.ReadDateTimeOffset();
+    private static void WriteGuid(ref JsonWriter writer, Guid value) => writer.WriteGuid(value);
+    private static Guid ReadGuid(ref JsonReader reader) => reader.ReadGuid();
 
     private static SampleDto CreateSample() => new()
     {

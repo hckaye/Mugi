@@ -41,13 +41,13 @@ internal sealed class JsonSourceEmitter
     internal string EmitRegistration()
     {
         var writer = StartFile();
-        writer.Open("internal static class MiyaJsonGeneratedRegistration");
+        writer.Open("internal static class JsonGeneratedRegistration");
         writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
         writer.Open("internal static void Initialize()");
         foreach (var model in _models)
         {
             writer.Line(
-                "global::Miya.Json.MiyaJson.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
+                "global::Miya.Json.Json.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
                 TypeNames.CodecName(model.Type) + ".Instance);");
         }
 
@@ -59,11 +59,11 @@ internal sealed class JsonSourceEmitter
     private static void EmitRegistration(CodeWriter writer, JsonTypeModel model)
     {
         var codecName = TypeNames.CodecName(model.Type);
-        writer.Open("internal static class MiyaJsonGeneratedRegistration_" + codecName);
+        writer.Open("internal static class JsonGeneratedRegistration_" + codecName);
         writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
         writer.Open("internal static void Initialize()");
         writer.Line(
-            "global::Miya.Json.MiyaJson.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
+            "global::Miya.Json.Json.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
             codecName + ".Instance);");
         writer.Close();
         writer.Close();
@@ -87,25 +87,25 @@ internal sealed class JsonSourceEmitter
         var valueTypeName = NullableContractType(model.Type);
         writer.Open(
             "internal sealed class " + codecName +
-            " : global::Miya.Json.IMiyaJsonCodec<" + typeName + ">");
+            " : global::Miya.Json.IJsonCodec<" + typeName + ">");
         writer.Line("internal static readonly " + codecName + " Instance = new " + codecName + "();");
         writer.Line();
         writer.Line(
-            "public void Write(ref global::Miya.Json.MiyaJsonWriter writer, " + valueTypeName +
+            "public void Write(ref global::Miya.Json.JsonWriter writer, " + valueTypeName +
             " value) => WriteValue(ref writer, value);");
         writer.Line(
             "public " + valueTypeName +
-            " Read(ref global::Miya.Json.MiyaJsonReader reader) => ReadValue(ref reader, 0);");
+            " Read(ref global::Miya.Json.JsonReader reader) => ReadValue(ref reader, 0);");
         writer.Line();
         writer.Open(
-            "internal static void WriteValue(ref global::Miya.Json.MiyaJsonWriter writer, " +
+            "internal static void WriteValue(ref global::Miya.Json.JsonWriter writer, " +
             valueTypeName + " value)");
         EmitWriteBody(writer, model);
         writer.Close();
         writer.Line();
         writer.Open(
             "internal static " + valueTypeName +
-            " ReadValue(ref global::Miya.Json.MiyaJsonReader reader, int depth)");
+            " ReadValue(ref global::Miya.Json.JsonReader reader, int depth)");
         EmitReadBody(writer, model);
         writer.Close();
 
@@ -288,7 +288,7 @@ internal sealed class JsonSourceEmitter
             case JsonTypeKind.Char:
                 writer.Line("var text = reader.ReadString();");
                 writer.Open("if (text is null || text.Length != 1)");
-                writer.Line("throw new global::Miya.Json.MiyaJsonException(\"Expected a single JSON character.\", isInputError: true);");
+                writer.Line("throw new global::Miya.Json.JsonException(\"Expected a single JSON character.\", isInputError: true);");
                 writer.Close();
                 writer.Line("return text[0];");
                 return;
@@ -401,7 +401,7 @@ internal sealed class JsonSourceEmitter
                     if (item.Model.Property.Type.IsReferenceType
                         && item.Model.Property.NullableAnnotation == NullableAnnotation.NotAnnotated)
                     {
-                        read += " ?? throw new global::Miya.Json.MiyaJsonException(" +
+                        read += " ?? throw new global::Miya.Json.JsonException(" +
                             GeneratedNaming.Literal("Property '" + item.JsonName + "' cannot be null.") +
                             ", isInputError: true)";
                     }
@@ -438,7 +438,7 @@ internal sealed class JsonSourceEmitter
         {
             writer.Open("if (" + string.Join(" || ", required.Select(static item => "!hasProperty" + item.Index)) + ")");
             writer.Line(
-                "throw new global::Miya.Json.MiyaJsonException(" +
+                "throw new global::Miya.Json.JsonException(" +
                 GeneratedNaming.Literal("One or more required properties are missing for '" + TypeNames.Display(model.Type) + "'.") +
                 ", isInputError: true);");
             writer.Close();
@@ -469,7 +469,7 @@ internal sealed class JsonSourceEmitter
         writer.Close();
         writer.Open("catch (global::System.OverflowException exception)");
         writer.Line(
-            "throw new global::Miya.Json.MiyaJsonException(" +
+            "throw new global::Miya.Json.JsonException(" +
             GeneratedNaming.Literal("The JSON number is outside the " + typeName + " range.") +
             ", exception, isInputError: true);");
         writer.Close();

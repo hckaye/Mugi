@@ -37,11 +37,11 @@ internal sealed class SampleDto
     public RecursiveNode? Node { get; set; }
 }
 
-internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
+internal sealed class SampleDtoCodec : IJsonCodec<SampleDto>
 {
     public static SampleDtoCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, SampleDto? value)
+    public void Write(ref JsonWriter writer, SampleDto? value)
     {
         if (value is null)
         {
@@ -86,7 +86,7 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
         writer.WriteRaw("}"u8);
     }
 
-    public SampleDto? Read(ref MiyaJsonReader reader)
+    public SampleDto? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -107,7 +107,7 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
             }
             else if (name.SequenceEqual("name"u8))
             {
-                result.Name = reader.ReadString() ?? throw new MiyaJsonException("The required name cannot be null.");
+                result.Name = reader.ReadString() ?? throw new JsonException("The required name cannot be null.");
                 hasName = true;
             }
             else if (name.SequenceEqual("active"u8))
@@ -162,13 +162,13 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
 
         if (!hasId || !hasName)
         {
-            throw new MiyaJsonException("The required id and name properties must be present.");
+            throw new JsonException("The required id and name properties must be present.");
         }
 
         return result;
     }
 
-    private static void WriteInt32List(ref MiyaJsonWriter writer, List<int> values)
+    private static void WriteInt32List(ref JsonWriter writer, List<int> values)
     {
         writer.WriteRaw("["u8);
         for (var index = 0; index < values.Count; index++)
@@ -184,7 +184,7 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
         writer.WriteRaw("]"u8);
     }
 
-    private static List<int> ReadInt32List(ref MiyaJsonReader reader)
+    private static List<int> ReadInt32List(ref JsonReader reader)
     {
         var result = new List<int>();
         reader.ReadBeginArray();
@@ -196,7 +196,7 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
         return result;
     }
 
-    private static void WriteStringDictionary(ref MiyaJsonWriter writer, Dictionary<string, string?> values)
+    private static void WriteStringDictionary(ref JsonWriter writer, Dictionary<string, string?> values)
     {
         writer.WriteRaw("{"u8);
         var index = 0;
@@ -215,7 +215,7 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
         writer.WriteRaw("}"u8);
     }
 
-    private static Dictionary<string, string?> ReadStringDictionary(ref MiyaJsonReader reader)
+    private static Dictionary<string, string?> ReadStringDictionary(ref JsonReader reader)
     {
         var result = new Dictionary<string, string?>(StringComparer.Ordinal);
         reader.ReadBeginObject();
@@ -229,11 +229,11 @@ internal sealed class SampleDtoCodec : IMiyaJsonCodec<SampleDto>
     }
 }
 
-internal sealed class NestedDtoCodec : IMiyaJsonCodec<NestedDto>
+internal sealed class NestedDtoCodec : IJsonCodec<NestedDto>
 {
     public static NestedDtoCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, NestedDto? value)
+    public void Write(ref JsonWriter writer, NestedDto? value)
     {
         if (value is null)
         {
@@ -248,7 +248,7 @@ internal sealed class NestedDtoCodec : IMiyaJsonCodec<NestedDto>
         writer.WriteRaw("}"u8);
     }
 
-    public NestedDto? Read(ref MiyaJsonReader reader)
+    public NestedDto? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -278,11 +278,11 @@ internal sealed class NestedDtoCodec : IMiyaJsonCodec<NestedDto>
     }
 }
 
-internal sealed class RecursiveNodeCodec : IMiyaJsonCodec<RecursiveNode>
+internal sealed class RecursiveNodeCodec : IJsonCodec<RecursiveNode>
 {
     public static RecursiveNodeCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, RecursiveNode? value)
+    public void Write(ref JsonWriter writer, RecursiveNode? value)
     {
         if (value is null)
         {
@@ -297,7 +297,7 @@ internal sealed class RecursiveNodeCodec : IMiyaJsonCodec<RecursiveNode>
         writer.WriteRaw("}"u8);
     }
 
-    public RecursiveNode? Read(ref MiyaJsonReader reader)
+    public RecursiveNode? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -327,7 +327,7 @@ internal sealed class RecursiveNodeCodec : IMiyaJsonCodec<RecursiveNode>
     }
 }
 
-internal sealed class DelegateCodec<T> : IMiyaJsonCodec<T>
+internal sealed class DelegateCodec<T> : IJsonCodec<T>
 {
     private readonly WriteValue<T> _write;
     private readonly ReadValue<T> _read;
@@ -338,21 +338,21 @@ internal sealed class DelegateCodec<T> : IMiyaJsonCodec<T>
         _read = read;
     }
 
-    public void Write(ref MiyaJsonWriter writer, T? value) => _write(ref writer, value);
+    public void Write(ref JsonWriter writer, T? value) => _write(ref writer, value);
 
-    public T? Read(ref MiyaJsonReader reader) => _read(ref reader);
+    public T? Read(ref JsonReader reader) => _read(ref reader);
 }
 
-internal delegate void WriteValue<T>(ref MiyaJsonWriter writer, T? value);
-internal delegate T? ReadValue<T>(ref MiyaJsonReader reader);
+internal delegate void WriteValue<T>(ref JsonWriter writer, T? value);
+internal delegate T? ReadValue<T>(ref JsonReader reader);
 
-internal sealed class SkipCodec : IMiyaJsonCodec<bool>
+internal sealed class SkipCodec : IJsonCodec<bool>
 {
     public static SkipCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, bool value) => throw new NotSupportedException();
+    public void Write(ref JsonWriter writer, bool value) => throw new NotSupportedException();
 
-    public bool Read(ref MiyaJsonReader reader)
+    public bool Read(ref JsonReader reader)
     {
         reader.SkipValue();
         return true;
@@ -361,10 +361,10 @@ internal sealed class SkipCodec : IMiyaJsonCodec<bool>
 
 internal static class JsonTestHelpers
 {
-    public static byte[] Serialize<T>(T value, IMiyaJsonCodec<T> codec, MiyaJsonOptions? options = null)
+    public static byte[] Serialize<T>(T value, IJsonCodec<T> codec, JsonOptions? options = null)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        MiyaJson.Serialize(buffer, value, codec, options);
+        Json.Serialize(buffer, value, codec, options);
         return buffer.WrittenSpan.ToArray();
     }
 }

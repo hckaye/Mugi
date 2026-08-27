@@ -13,7 +13,7 @@ namespace Miya;
 
 public class Context
 {
-    private static readonly MiyaOptions DefaultOptions = new();
+    private static readonly Options DefaultOptions = new();
     private static readonly AsyncLocal<RequestLease?> CurrentLease = new();
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -26,7 +26,7 @@ public class Context
     private IHttpResponseFeature? _responseFeature;
     private IHttpResponseBodyFeature? _responseBodyFeature;
     private IHttpRequestLifetimeFeature? _lifetimeFeature;
-    private MiyaOptions _options = DefaultOptions;
+    private Options _options = DefaultOptions;
     private ResponseState _responseState;
     private int _statusCode = StatusCodes.Status200OK;
     private string[]? _parameterNames;
@@ -81,7 +81,7 @@ public class Context
         }
     }
 
-    internal MiyaOptions Options
+    internal Options Options
     {
         get
         {
@@ -192,12 +192,12 @@ public class Context
     public ValueTask Json<T>(T value)
     {
         EnsureBodyMutable();
-        var codec = MiyaJson.GetCodec<T>();
+        var codec = global::Miya.Json.Json.GetCodec<T>();
         _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
         long measuredLength;
         try
         {
-            MiyaJson.Serialize(_measurementWriter, value, codec, _options.Json);
+            global::Miya.Json.Json.Serialize(_measurementWriter, value, codec, _options.Json);
             measuredLength = _measurementWriter.WrittenCount;
         }
         finally
@@ -211,11 +211,11 @@ public class Context
             return ValueTask.CompletedTask;
         }
 
-        MiyaJson.Serialize(_responseWriter, value, codec, _options.Json);
+        global::Miya.Json.Json.Serialize(_responseWriter, value, codec, _options.Json);
         return FinishBodyWrite();
     }
 
-    public ValueTask Json<T>(T value, IMiyaJsonCodec<T> codec)
+    public ValueTask Json<T>(T value, IJsonCodec<T> codec)
     {
         EnsureActive();
         ArgumentNullException.ThrowIfNull(codec);
@@ -224,7 +224,7 @@ public class Context
         long measuredLength;
         try
         {
-            MiyaJson.Serialize(_measurementWriter, value, codec, _options.Json);
+            global::Miya.Json.Json.Serialize(_measurementWriter, value, codec, _options.Json);
             measuredLength = _measurementWriter.WrittenCount;
         }
         finally
@@ -238,7 +238,7 @@ public class Context
             return ValueTask.CompletedTask;
         }
 
-        var writer = new MiyaJsonWriter(_responseWriter, _options.Json);
+        var writer = new JsonWriter(_responseWriter, _options.Json);
         codec.Write(ref writer, value);
         writer.Flush();
         return FinishBodyWrite();
@@ -334,7 +334,7 @@ public class Context
         return Text("Not Found");
     }
 
-    internal void Initialize(IFeatureCollection features, MiyaOptions? options = null)
+    internal void Initialize(IFeatureCollection features, Options? options = null)
     {
         ArgumentNullException.ThrowIfNull(features);
         if (_features is not null)

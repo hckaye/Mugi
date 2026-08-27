@@ -108,7 +108,7 @@ internal static class InvocationAnalyzer
             return true;
         }
 
-        if (containingName == "Miya.Json.MiyaJson"
+        if (containingName == "Miya.Json.Json"
             && (method.Name == "Include" || method.Name == "Serialize" || method.Name == "Deserialize"))
         {
             if (method.Name != "Include" && HasExplicitCodecParameter(method))
@@ -128,7 +128,7 @@ internal static class InvocationAnalyzer
         foreach (var parameter in method.Parameters)
         {
             if (parameter.Type is INamedTypeSymbol named
-                && GetMetadataName(named.OriginalDefinition) == "Miya.Json.IMiyaJsonCodec`1")
+                && GetMetadataName(named.OriginalDefinition) == "Miya.Json.IJsonCodec`1")
             {
                 return true;
             }

@@ -9,7 +9,7 @@ internal static class DiagnosticCatalog
     internal static readonly DiagnosticDescriptor AnonymousJsonType = new(
         "MIYA001",
         "Anonymous JSON types are not supported",
-        "The anonymous type '{0}' cannot have a MiyaJson codec generated",
+        "The anonymous type '{0}' cannot have a Json codec generated",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -33,7 +33,7 @@ internal static class DiagnosticCatalog
     internal static readonly DiagnosticDescriptor UnsupportedJsonType = new(
         "MIYA004",
         "The JSON type is not supported",
-        "A MiyaJson codec cannot be generated for '{0}': {1}",
+        "A Json codec cannot be generated for '{0}': {1}",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

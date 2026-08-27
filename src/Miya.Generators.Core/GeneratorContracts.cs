@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Miya.Generators.Core;
 
-public enum MiyaJsonNaming
+public enum JsonNaming
 {
     CamelCase,
     PascalCase,
@@ -12,14 +12,14 @@ public enum MiyaJsonNaming
 public sealed class GeneratorSettings
 {
     public GeneratorSettings(
-        MiyaJsonNaming naming = MiyaJsonNaming.CamelCase,
+        JsonNaming naming = JsonNaming.CamelCase,
         bool emitInterceptors = true)
     {
         Naming = naming;
         EmitInterceptors = emitInterceptors;
     }
 
-    public MiyaJsonNaming Naming { get; }
+    public JsonNaming Naming { get; }
 
     public bool EmitInterceptors { get; }
 

@@ -64,7 +64,7 @@ internal static class ProgramEntry
             }
 
             var naming = ReadNaming(projectPath, project);
-            var result = MiyaGeneratorCore.Generate(
+            var result = GeneratorCore.Generate(
                 compilation,
                 new GeneratorSettings(naming, emitInterceptors: false));
             foreach (var diagnostic in result.Diagnostics.OrderBy(static item => item.Location.SourceSpan.Start))
@@ -109,7 +109,7 @@ internal static class ProgramEntry
         }
     }
 
-    private static MiyaJsonNaming ReadNaming(string projectPath, Project project)
+    private static JsonNaming ReadNaming(string projectPath, Project project)
     {
         if (project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions.TryGetValue(
                 "build_property.MiyaJsonNaming",
@@ -123,11 +123,11 @@ internal static class ProgramEntry
         return ParseNaming(evaluatedProject.GetPropertyValue("MiyaJsonNaming"));
     }
 
-    private static MiyaJsonNaming ParseNaming(string? naming)
+    private static JsonNaming ParseNaming(string? naming)
     {
         return string.Equals(naming, "PascalCase", StringComparison.OrdinalIgnoreCase)
-            ? MiyaJsonNaming.PascalCase
-            : MiyaJsonNaming.CamelCase;
+            ? JsonNaming.PascalCase
+            : JsonNaming.CamelCase;
     }
 
     private static bool TryParseArguments(

@@ -36,7 +36,7 @@ public sealed class GeneratorExecutionTests
             {
                 public static string Run()
                 {
-                    MiyaJson.Include<Payload>();
+                    Json.Include<Payload>();
                     var value = new Payload
                     {
                         Name = "sample",
@@ -47,8 +47,8 @@ public sealed class GeneratorExecutionTests
                         Root = new Node { Value = 1, Next = new Node { Value = 2 } },
                     };
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, value);
-                    var copy = MiyaJson.Deserialize<Payload>(buffer.WrittenSpan)!;
+                    Json.Serialize(buffer, value);
+                    var copy = Json.Deserialize<Payload>(buffer.WrittenSpan)!;
                     return Encoding.UTF8.GetString(buffer.WrittenSpan) + "\n" +
                         copy.Name + ":" + copy.Child!.Id + ":" + copy.Values.Count + ":" +
                         copy.Children["first"]!.Note + ":" + (short)copy.State + ":" + copy.Root!.Next!.Value;
@@ -79,8 +79,8 @@ public sealed class GeneratorExecutionTests
             {
                 public static void Run()
                 {
-                    MiyaJson.Include<Payload>();
-                    MiyaJson.Deserialize<Payload>("{}"u8);
+                    Json.Include<Payload>();
+                    Json.Deserialize<Payload>("{}"u8);
                 }
             }
             """;
@@ -91,7 +91,7 @@ public sealed class GeneratorExecutionTests
 
         var exception = Assert.Throws<TargetInvocationException>(
             () => assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
-        var jsonException = Assert.IsType<Miya.Json.MiyaJsonException>(exception.InnerException);
+        var jsonException = Assert.IsType<Miya.Json.JsonException>(exception.InnerException);
         Assert.True(jsonException.IsInputError);
     }
 
@@ -108,23 +108,23 @@ public sealed class GeneratorExecutionTests
             public sealed class Node { public Node? Next { get; set; } }
             public static class Runner
             {
-                private static MiyaJsonOptions CancelledOptions()
+                private static JsonOptions CancelledOptions()
                 {
                     var source = new CancellationTokenSource();
                     source.Cancel();
-                    return new MiyaJsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
+                    return new JsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
                 }
 
                 public static void ReadCollection()
                 {
                     var json = Encoding.UTF8.GetBytes("[" + string.Join(',', new int[10_000]) + "]");
-                    MiyaJson.Deserialize<List<int>>(json, CancelledOptions());
+                    Json.Deserialize<List<int>>(json, CancelledOptions());
                 }
 
                 public static void ReadDeep()
                 {
                     var json = Encoding.UTF8.GetBytes(new string('[', 256) + "null" + new string(']', 256));
-                    MiyaJson.Deserialize<List<List<int>>>(json, CancelledOptions());
+                    Json.Deserialize<List<List<int>>>(json, CancelledOptions());
                 }
             }
             """;
@@ -154,17 +154,17 @@ public sealed class GeneratorExecutionTests
             public sealed class Node { public Node? Next { get; set; } }
             public static class Runner
             {
-                private static MiyaJsonOptions CancelledOptions()
+                private static JsonOptions CancelledOptions()
                 {
                     var source = new CancellationTokenSource();
                     source.Cancel();
-                    return new MiyaJsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
+                    return new JsonOptions { CancellationToken = source.Token, MaxDepth = 512 };
                 }
 
                 public static void WriteCollection()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new int[10_000], CancelledOptions());
+                    Json.Serialize(buffer, new int[10_000], CancelledOptions());
                 }
 
                 public static void WriteDeep()
@@ -178,13 +178,13 @@ public sealed class GeneratorExecutionTests
                     }
 
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, node, CancelledOptions());
+                    Json.Serialize(buffer, node, CancelledOptions());
                 }
 
                 public static void WriteLargeString()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new string('x', 128 * 1024), CancelledOptions());
+                    Json.Serialize(buffer, new string('x', 128 * 1024), CancelledOptions());
                 }
             }
             """;
@@ -217,29 +217,29 @@ public sealed class GeneratorExecutionTests
                 public static void WriteDepth()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new Payload { Child = new Child { Id = 1 } },
-                        new MiyaJsonOptions { MaxDepth = 1 });
+                    Json.Serialize(buffer, new Payload { Child = new Child { Id = 1 } },
+                        new JsonOptions { MaxDepth = 1 });
                 }
 
                 public static void WriteCollection()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new List<int> { 1, 2 },
-                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                    Json.Serialize(buffer, new List<int> { 1, 2 },
+                        new JsonOptions { MaxCollectionSize = 1 });
                 }
 
                 public static void WriteArray()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new int[] { 1, 2 },
-                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                    Json.Serialize(buffer, new int[] { 1, 2 },
+                        new JsonOptions { MaxCollectionSize = 1 });
                 }
 
                 public static void WriteDictionary()
                 {
                     var buffer = new ArrayBufferWriter<byte>();
-                    MiyaJson.Serialize(buffer, new Dictionary<string, int> { ["a"] = 1, ["b"] = 2 },
-                        new MiyaJsonOptions { MaxCollectionSize = 1 });
+                    Json.Serialize(buffer, new Dictionary<string, int> { ["a"] = 1, ["b"] = 2 },
+                        new JsonOptions { MaxCollectionSize = 1 });
                 }
             }
             """;
@@ -257,10 +257,10 @@ public sealed class GeneratorExecutionTests
             () => runner.GetMethod("WriteArray")!.Invoke(null, null));
         var dictionary = Assert.Throws<TargetInvocationException>(
             () => runner.GetMethod("WriteDictionary")!.Invoke(null, null));
-        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(depth.InnerException).IsInputError);
-        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(collection.InnerException).IsInputError);
-        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(array.InnerException).IsInputError);
-        Assert.False(Assert.IsType<Miya.Json.MiyaJsonException>(dictionary.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.JsonException>(depth.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.JsonException>(collection.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.JsonException>(array.InnerException).IsInputError);
+        Assert.False(Assert.IsType<Miya.Json.JsonException>(dictionary.InnerException).IsInputError);
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class GeneratorExecutionTests
             using Miya.Json;
             public static class Runner
             {
-                public static void Run() => MiyaJson.Deserialize<byte>("256"u8);
+                public static void Run() => Json.Deserialize<byte>("256"u8);
             }
             """;
 
@@ -280,7 +280,7 @@ public sealed class GeneratorExecutionTests
 
         var invocation = Assert.Throws<TargetInvocationException>(
             () => assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
-        var exception = Assert.IsType<Miya.Json.MiyaJsonException>(invocation.InnerException);
+        var exception = Assert.IsType<Miya.Json.JsonException>(invocation.InnerException);
         Assert.True(exception.IsInputError);
         Assert.IsType<OverflowException>(exception.InnerException);
     }

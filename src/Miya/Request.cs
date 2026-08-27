@@ -71,7 +71,7 @@ public sealed class Request
         _context.EnsureActive();
         var limit = Math.Min(_context.Options.MaxRequestBodyBytes, _context.Options.MaxJsonBodyBytes);
         using var body = await ReadBody(limit).ConfigureAwait(false);
-        return MiyaJson.Deserialize<T>(body.WrittenMemory.Span, _context.Options.Json);
+        return global::Miya.Json.Json.Deserialize<T>(body.WrittenMemory.Span, _context.Options.Json);
     }
 
     internal void Reset()

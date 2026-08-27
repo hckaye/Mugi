@@ -7,7 +7,7 @@ using Miya.Json;
 namespace Miya;
 
 [Flags]
-public enum MiyaProtocols
+public enum Protocols
 {
     Http1 = 1,
     Http2 = 2,
@@ -16,9 +16,9 @@ public enum MiyaProtocols
     Http1AndHttp2AndHttp3 = Http1 | Http2 | Http3,
 }
 
-public sealed class MiyaOptions
+public sealed class Options
 {
-    private MiyaProtocols? _protocols;
+    private Protocols? _protocols;
 
     public int? Port { get; init; }
 
@@ -33,9 +33,9 @@ public sealed class MiyaOptions
     /// Gets the enabled HTTP protocols. Without a certificate the default is HTTP/1.1. With a certificate
     /// the default is HTTP/1.1 and HTTP/2. Cleartext HTTP/2 requires selecting HTTP/2 alone.
     /// </summary>
-    public MiyaProtocols Protocols
+    public Protocols Protocols
     {
-        get => _protocols ?? (Certificate is null ? MiyaProtocols.Http1 : MiyaProtocols.Http1AndHttp2);
+        get => _protocols ?? (Certificate is null ? Protocols.Http1 : Protocols.Http1AndHttp2);
         init => _protocols = value;
     }
 
@@ -63,7 +63,7 @@ public sealed class MiyaOptions
 
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
-    public MiyaJsonOptions Json { get; init; } = MiyaJsonOptions.Default;
+    public JsonOptions Json { get; init; } = JsonOptions.Default;
 
     internal void Validate()
     {
@@ -72,7 +72,7 @@ public sealed class MiyaOptions
             throw new ArgumentOutOfRangeException(nameof(Port), "Port must be between 0 and 65535.");
         }
 
-        const MiyaProtocols allProtocols = MiyaProtocols.Http1 | MiyaProtocols.Http2 | MiyaProtocols.Http3;
+        const Protocols allProtocols = Protocols.Http1 | Protocols.Http2 | Protocols.Http3;
         var protocols = Protocols;
         if (protocols == 0 || (protocols & ~allProtocols) != 0)
         {
@@ -83,12 +83,12 @@ public sealed class MiyaOptions
 
         if (Certificate is null)
         {
-            if ((protocols & MiyaProtocols.Http3) != 0)
+            if ((protocols & Protocols.Http3) != 0)
             {
                 throw new InvalidOperationException("HTTP/3 requires a TLS certificate.");
             }
 
-            if (protocols is not MiyaProtocols.Http1 and not MiyaProtocols.Http2)
+            if (protocols is not Protocols.Http1 and not Protocols.Http2)
             {
                 throw new InvalidOperationException(
                     "A cleartext listener must select exactly HTTP/1.1 or HTTP/2. " +

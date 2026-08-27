@@ -72,7 +72,7 @@ public sealed class JsonIntegrationTests
             return operation;
         });
 
-        await using var server = await app.StartAsync(new MiyaOptions
+        await using var server = await app.StartAsync(new Options
         {
             Port = 0,
             MaxBufferedResponseBytes = 10,
@@ -104,7 +104,7 @@ public sealed class JsonIntegrationTests
 
     private static App CreateApp()
     {
-        MiyaJson.Register(JsonUserCodec.Instance);
+        global::Miya.Json.Json.Register(JsonUserCodec.Instance);
 
         var app = new App();
         app.Get("/users/:id", context =>
@@ -119,14 +119,14 @@ public sealed class JsonIntegrationTests
 
     private static ValueTask WriteGenericJson<T>(Context context, T value) => context.Json(value);
 
-    private static Task<MiyaServer> StartAsync(App app) => app.StartAsync(
-        new MiyaOptions
+    private static Task<Server> StartAsync(App app) => app.StartAsync(
+        new Options
         {
             Port = 0,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
 
-    private static HttpClient CreateClient(MiyaServer server) => new()
+    private static HttpClient CreateClient(Server server) => new()
     {
         BaseAddress = new Uri(server.Addresses[0]),
         Timeout = OperationTimeout,
@@ -139,11 +139,11 @@ internal sealed record PromotionPayload(string Value);
 
 internal sealed record UnregisteredOutputPayload(int Value);
 
-internal sealed class PromotionPayloadCodec : IMiyaJsonCodec<PromotionPayload>
+internal sealed class PromotionPayloadCodec : IJsonCodec<PromotionPayload>
 {
     public static PromotionPayloadCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, PromotionPayload? value)
+    public void Write(ref JsonWriter writer, PromotionPayload? value)
     {
         if (value is null)
         {
@@ -157,14 +157,14 @@ internal sealed class PromotionPayloadCodec : IMiyaJsonCodec<PromotionPayload>
         writer.WriteRaw("}"u8);
     }
 
-    public PromotionPayload? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
+    public PromotionPayload? Read(ref JsonReader reader) => throw new NotSupportedException();
 }
 
-internal sealed class JsonUserCodec : IMiyaJsonCodec<JsonUser>
+internal sealed class JsonUserCodec : IJsonCodec<JsonUser>
 {
     public static JsonUserCodec Instance { get; } = new();
 
-    public void Write(ref MiyaJsonWriter writer, JsonUser? value)
+    public void Write(ref JsonWriter writer, JsonUser? value)
     {
         if (value is null)
         {
@@ -179,7 +179,7 @@ internal sealed class JsonUserCodec : IMiyaJsonCodec<JsonUser>
         writer.WriteRaw("}"u8);
     }
 
-    public JsonUser? Read(ref MiyaJsonReader reader)
+    public JsonUser? Read(ref JsonReader reader)
     {
         if (reader.TryReadNull())
         {
@@ -198,7 +198,7 @@ internal sealed class JsonUserCodec : IMiyaJsonCodec<JsonUser>
             }
             else if (propertyName.SequenceEqual("name"u8))
             {
-                name = reader.ReadString() ?? throw new MiyaJsonException("The name cannot be null.");
+                name = reader.ReadString() ?? throw new JsonException("The name cannot be null.");
             }
             else
             {

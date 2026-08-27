@@ -6,13 +6,13 @@ using System.Text;
 namespace Miya.Json;
 
 /// <summary>Reads one complete UTF-8 JSON document from a span.</summary>
-public ref struct MiyaJsonReader
+public ref struct JsonReader
 {
     private const int InlineFrameCount = 64;
     private const int MaximumRetainedFrameCount = 256;
 
     private readonly ReadOnlySpan<byte> _source;
-    private readonly MiyaJsonOptions _options;
+    private readonly JsonOptions _options;
     private InlineFrames _inlineFrames;
     private ContainerFrame[]? _frames;
     private byte[]? _scratch;
@@ -23,13 +23,13 @@ public ref struct MiyaJsonReader
     private bool _rootValueStarted;
     private bool _disposed;
 
-    public MiyaJsonReader(ReadOnlySpan<byte> utf8Json, MiyaJsonOptions options)
+    public JsonReader(ReadOnlySpan<byte> utf8Json, JsonOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         ValidateOptions(options);
         if (utf8Json.Length > options.MaxDocumentByteLength)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"The JSON document exceeds the {options.MaxDocumentByteLength}-byte limit.",
                 isInputError: true);
         }
@@ -184,7 +184,7 @@ public ref struct MiyaJsonReader
         }
         catch (DecoderFallbackException exception)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"Invalid UTF-8 at byte offset {_position}.",
                 exception,
                 isInputError: true);
@@ -972,10 +972,10 @@ public ref struct MiyaJsonReader
         }
     }
 
-    private MiyaJsonException Error(string message) =>
+    private JsonException Error(string message) =>
         new($"{message} at byte offset {_position}.", isInputError: true);
 
-    private static void ValidateOptions(MiyaJsonOptions options)
+    private static void ValidateOptions(JsonOptions options)
     {
         if (options.MaxDepth is < 1 or > 1024)
         {
@@ -986,7 +986,7 @@ public ref struct MiyaJsonReader
             options.MaxCollectionSize < 0 || options.MaxNumberDigits < 1 ||
             options.MaxPooledBufferByteLength < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "MiyaJson limits must not be negative or zero where a value is required.");
+            throw new ArgumentOutOfRangeException(nameof(options), "Json limits must not be negative or zero where a value is required.");
         }
     }
 

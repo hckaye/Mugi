@@ -8,7 +8,7 @@ using System.Text.Unicode;
 namespace Miya.Json;
 
 /// <summary>Writes UTF-8 JSON directly into an <see cref="IBufferWriter{Byte}"/>.</summary>
-public ref struct MiyaJsonWriter
+public ref struct JsonWriter
 {
     private const int CancellationCheckByteInterval = 64 * 1024;
     private const int CancellationCheckDepthInterval = 64;
@@ -20,7 +20,7 @@ public ref struct MiyaJsonWriter
         "\"\\\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000A\u000B\u000C\u000D\u000E\u000F\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F"u8);
 
     private readonly IBufferWriter<byte> _destination;
-    private readonly MiyaJsonOptions _options;
+    private readonly JsonOptions _options;
     private readonly CancellationToken _cancellationToken;
     private readonly int _maxDepth;
     private readonly int _maxCollectionSize;
@@ -32,11 +32,11 @@ public ref struct MiyaJsonWriter
     private int _bytesUntilCancellationCheck;
     private int _depth;
 
-    public MiyaJsonWriter(IBufferWriter<byte> destination, MiyaJsonOptions options)
+    public JsonWriter(IBufferWriter<byte> destination, JsonOptions options)
     {
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(options);
-        if (!ReferenceEquals(options, MiyaJsonOptions.Default))
+        if (!ReferenceEquals(options, JsonOptions.Default))
         {
             ValidateOptions(options);
         }
@@ -69,13 +69,13 @@ public ref struct MiyaJsonWriter
 
         if (_depth >= _maxDepth)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"The JSON nesting depth exceeds the {_maxDepth}-level limit.");
         }
 
         if (elementCount > _maxCollectionSize)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"The container exceeds the {_maxCollectionSize}-element limit.");
         }
 
@@ -93,7 +93,7 @@ public ref struct MiyaJsonWriter
     {
         if (_depth == 0)
         {
-            throw new MiyaJsonException("No JSON container is currently open.");
+            throw new JsonException("No JSON container is currently open.");
         }
 
         _depth--;
@@ -161,7 +161,7 @@ public ref struct MiyaJsonWriter
                 }
                 catch (OverflowException exception)
                 {
-                    throw new MiyaJsonException("The string is too large to encode as UTF-8.", exception);
+                    throw new JsonException("The string is too large to encode as UTF-8.", exception);
                 }
 
                 destination = GetWriteSpan(maximumEncodedLength);
@@ -174,7 +174,7 @@ public ref struct MiyaJsonWriter
                     isFinalBlock: true);
                 if (utf8Status != OperationStatus.Done || charsRead != value.Length)
                 {
-                    throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+                    throw new JsonException("The string contains an invalid UTF-16 surrogate sequence.");
                 }
 
                 EnsureStringCapacity(bytesWritten);
@@ -211,14 +211,14 @@ public ref struct MiyaJsonWriter
             }
             catch (OverflowException exception)
             {
-                throw new MiyaJsonException("The string is too large to encode as JSON.", exception);
+                throw new JsonException("The string is too large to encode as JSON.", exception);
             }
 
             var destination = GetWriteSpan(maximumEncodedLength);
             var written = EncodeStringChunk(chunk, destination);
             if (written > _maxStringByteLength - totalEncodedLength)
             {
-                throw new MiyaJsonException(
+                throw new JsonException(
                     $"The encoded string exceeds the {_maxStringByteLength}-byte limit.");
             }
 
@@ -266,7 +266,7 @@ public ref struct MiyaJsonWriter
             isFinalBlock: true);
         if (status != OperationStatus.Done || charsRead != value.Length)
         {
-            throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+            throw new JsonException("The string contains an invalid UTF-16 surrogate sequence.");
         }
 
         return bytesWritten;
@@ -284,7 +284,7 @@ public ref struct MiyaJsonWriter
             isFinalBlock: true);
         if (status != OperationStatus.Done || charsRead != value.Length)
         {
-            throw new MiyaJsonException("The string contains an invalid UTF-16 surrogate sequence.");
+            throw new JsonException("The string contains an invalid UTF-16 surrogate sequence.");
         }
 
         var written = 0;
@@ -392,13 +392,13 @@ public ref struct MiyaJsonWriter
     {
         if (!float.IsFinite(value) && !_options.AllowNonFiniteNumbers)
         {
-            throw new MiyaJsonException("Non-finite floating-point values are disabled.");
+            throw new JsonException("Non-finite floating-point values are disabled.");
         }
 
         Span<byte> buffer = stackalloc byte[32];
         if (!Utf8Formatter.TryFormat(value, buffer, out var written))
         {
-            throw new MiyaJsonException("The Single value could not be formatted.");
+            throw new JsonException("The Single value could not be formatted.");
         }
 
         WriteRaw(buffer[..written]);
@@ -408,13 +408,13 @@ public ref struct MiyaJsonWriter
     {
         if (!double.IsFinite(value) && !_options.AllowNonFiniteNumbers)
         {
-            throw new MiyaJsonException("Non-finite floating-point values are disabled.");
+            throw new JsonException("Non-finite floating-point values are disabled.");
         }
 
         Span<byte> buffer = stackalloc byte[32];
         if (!Utf8Formatter.TryFormat(value, buffer, out var written))
         {
-            throw new MiyaJsonException("The Double value could not be formatted.");
+            throw new JsonException("The Double value could not be formatted.");
         }
 
         WriteRaw(buffer[..written]);
@@ -425,7 +425,7 @@ public ref struct MiyaJsonWriter
         Span<byte> buffer = stackalloc byte[32];
         if (!Utf8Formatter.TryFormat(value, buffer, out var written))
         {
-            throw new MiyaJsonException("The Decimal value could not be formatted.");
+            throw new JsonException("The Decimal value could not be formatted.");
         }
 
         WriteRaw(buffer[..written]);
@@ -437,7 +437,7 @@ public ref struct MiyaJsonWriter
         buffer[0] = (byte)'"';
         if (!Utf8Formatter.TryFormat(value, buffer[1..], out var written, new StandardFormat('D')))
         {
-            throw new MiyaJsonException("The Guid value could not be formatted.");
+            throw new JsonException("The Guid value could not be formatted.");
         }
 
         buffer[written + 1] = (byte)'"';
@@ -450,7 +450,7 @@ public ref struct MiyaJsonWriter
         buffer[0] = (byte)'"';
         if (!Utf8Formatter.TryFormat(value, buffer[1..], out var written, new StandardFormat('O')))
         {
-            throw new MiyaJsonException("The DateTime value could not be formatted.");
+            throw new JsonException("The DateTime value could not be formatted.");
         }
 
         buffer[written + 1] = (byte)'"';
@@ -463,7 +463,7 @@ public ref struct MiyaJsonWriter
         buffer[0] = (byte)'"';
         if (!Utf8Formatter.TryFormat(value, buffer[1..], out var written, new StandardFormat('O')))
         {
-            throw new MiyaJsonException("The DateTimeOffset value could not be formatted.");
+            throw new JsonException("The DateTimeOffset value could not be formatted.");
         }
 
         buffer[written + 1] = (byte)'"';
@@ -619,7 +619,7 @@ public ref struct MiyaJsonWriter
     {
         if (encodedByteLength > _maxStringByteLength)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"The encoded string exceeds the {_maxStringByteLength}-byte limit.");
         }
     }
@@ -629,7 +629,7 @@ public ref struct MiyaJsonWriter
     {
         if (additionalBytes > _remainingDocumentBytes)
         {
-            throw new MiyaJsonException(
+            throw new JsonException(
                 $"The JSON document exceeds the {_maxDocumentByteLength}-byte limit.");
         }
 
@@ -674,7 +674,7 @@ public ref struct MiyaJsonWriter
         _buffer = default;
     }
 
-    private static void ValidateOptions(MiyaJsonOptions options)
+    private static void ValidateOptions(JsonOptions options)
     {
         if (options.MaxDepth is < 1 or > 1024)
         {
@@ -685,7 +685,7 @@ public ref struct MiyaJsonWriter
             options.MaxCollectionSize < 0 || options.MaxNumberDigits < 1 ||
             options.MaxPooledBufferByteLength < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "MiyaJson limits must not be negative or zero where a value is required.");
+            throw new ArgumentOutOfRangeException(nameof(options), "Json limits must not be negative or zero where a value is required.");
         }
     }
 }

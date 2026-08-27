@@ -54,7 +54,7 @@ public sealed class InterceptorTests
                 public static ValueTask Write(MyContext context, Payload value) =>
                     context.Json<Payload>(value);
                 public static ValueTask Generic<T>(Context context, T value) => context.Json(value);
-                public static void Include() => MiyaJson.Include<Payload>();
+                public static void Include() => Json.Include<Payload>();
             }
             """;
 
@@ -111,18 +111,18 @@ public sealed class InterceptorTests
             using Miya.Json;
 
             public sealed record Payload(int Id);
-            public sealed class CustomCodec : IMiyaJsonCodec<Payload>
+            public sealed class CustomCodec : IJsonCodec<Payload>
             {
                 public static readonly CustomCodec Instance = new();
-                public void Write(ref MiyaJsonWriter writer, Payload? value) =>
+                public void Write(ref JsonWriter writer, Payload? value) =>
                     writer.WriteRaw("{\"custom\":true}"u8);
-                public Payload? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
+                public Payload? Read(ref JsonReader reader) => throw new NotSupportedException();
             }
             public static class Runner
             {
                 public static async Task<string> Run()
                 {
-                    MiyaJson.Register<Payload>(CustomCodec.Instance);
+                    Json.Register<Payload>(CustomCodec.Instance);
                     var stream = new MemoryStream();
                     var features = new FeatureCollection();
                     features.Set<IHttpRequestFeature>(new HttpRequestFeature { Method = "GET", Path = "/" });
@@ -153,7 +153,7 @@ public sealed class InterceptorTests
             .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .ToArray();
         Assert.Empty(errors);
-        Assert.Contains("MiyaJson.ResolveCodec<global::Payload>", run.SourcesWithPrefix("Miya.Interceptor."), StringComparison.Ordinal);
+        Assert.Contains("Json.ResolveCodec<global::Payload>", run.SourcesWithPrefix("Miya.Interceptor."), StringComparison.Ordinal);
 
         var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
         var task = Assert.IsType<Task<string>>(
@@ -177,7 +177,7 @@ public sealed class InterceptorTests
 
     private static bool IsGeneratedInterceptor(MethodBase method)
     {
-        return method.DeclaringType?.FullName == "Miya.Generated.MiyaInterceptors";
+        return method.DeclaringType?.FullName == "Miya.Generated.Interceptors";
     }
 
     private static IEnumerable<MethodBase> GetCalledMethods(MethodInfo method)

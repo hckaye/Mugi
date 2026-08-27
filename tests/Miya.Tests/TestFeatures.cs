@@ -218,7 +218,7 @@ internal static class TestApp
         string queryString = "",
         byte[]? body = null,
         IReadOnlyDictionary<string, string>? headers = null,
-        MiyaOptions? options = null,
+        Options? options = null,
         string? rawTarget = null)
         where TContext : Context, new()
     {

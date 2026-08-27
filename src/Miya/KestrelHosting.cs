@@ -25,7 +25,7 @@ public partial class App<TContext>
     /// </summary>
     public void Run(int? port = null)
     {
-        var options = new MiyaOptions
+        var options = new Options
         {
             LoggerFactory = StderrLoggerFactory.Instance,
         };
@@ -36,12 +36,12 @@ public partial class App<TContext>
     /// <summary>
     /// Runs the configured HTTP server until cancellation or a termination signal requests shutdown.
     /// </summary>
-    public Task RunAsync(MiyaOptions? options = null, CancellationToken ct = default) =>
+    public Task RunAsync(Options? options = null, CancellationToken ct = default) =>
         RunAsyncCore(explicitPort: null, options, ct);
 
     private async Task RunAsyncCore(
         int? explicitPort,
-        MiyaOptions? options,
+        Options? options,
         CancellationToken ct)
     {
         var server = await StartAsyncCore(explicitPort, options, ct).ConfigureAwait(false);
@@ -58,17 +58,17 @@ public partial class App<TContext>
     /// <summary>
     /// Starts the configured HTTP server.
     /// </summary>
-    public Task<MiyaServer> StartAsync(
-        MiyaOptions? options = null,
+    public Task<Server> StartAsync(
+        Options? options = null,
         CancellationToken ct = default) =>
         StartAsyncCore(explicitPort: null, options, ct);
 
-    private async Task<MiyaServer> StartAsyncCore(
+    private async Task<Server> StartAsyncCore(
         int? explicitPort,
-        MiyaOptions? options,
+        Options? options,
         CancellationToken ct)
     {
-        var effectiveOptions = options ?? new MiyaOptions();
+        var effectiveOptions = options ?? new Options();
         effectiveOptions.Validate();
         var port = ResolvePort(
             explicitPort,
@@ -77,15 +77,15 @@ public partial class App<TContext>
         var loggerFactory = effectiveOptions.LoggerFactory ?? NullLoggerFactory.Instance;
         var protocols = effectiveOptions.Protocols;
 
-        if ((protocols & MiyaProtocols.Http3) != 0 && !QuicListener.IsSupported)
+        if ((protocols & Protocols.Http3) != 0 && !QuicListener.IsSupported)
         {
             throw new PlatformNotSupportedException(
                 "HTTP/3 was requested, but System.Net.Quic.QuicListener.IsSupported is false on this platform.");
         }
 
         if (port == 0
-            && (protocols & MiyaProtocols.Http3) != 0
-            && (protocols & (MiyaProtocols.Http1 | MiyaProtocols.Http2)) != 0)
+            && (protocols & Protocols.Http3) != 0
+            && (protocols & (Protocols.Http1 | Protocols.Http2)) != 0)
         {
             port = FindAvailableTcpAndUdpPort();
         }
@@ -95,10 +95,10 @@ public partial class App<TContext>
             : await StartServiceBackedAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false);
     }
 
-    private async Task<MiyaServer> StartDirectAsync(
-        MiyaOptions options,
+    private async Task<Server> StartDirectAsync(
+        Options options,
         int port,
-        MiyaProtocols protocols,
+        Protocols protocols,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -122,7 +122,7 @@ public partial class App<TContext>
         {
             var application = new KestrelApplication<TContext>(this, options, Build());
             await kestrel.StartAsync(application, ct).ConfigureAwait(false);
-            return new MiyaServer(
+            return new Server(
                 kestrel,
                 kestrel,
                 GetListeningAddresses(kestrel),
@@ -136,10 +136,10 @@ public partial class App<TContext>
         }
     }
 
-    private async Task<MiyaServer> StartServiceBackedAsync(
-        MiyaOptions options,
+    private async Task<Server> StartServiceBackedAsync(
+        Options options,
         int port,
-        MiyaProtocols protocols,
+        Protocols protocols,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -175,7 +175,7 @@ public partial class App<TContext>
             var server = host.Services.GetRequiredService<IServer>();
             var application = new KestrelApplication<TContext>(this, options, Build());
             await server.StartAsync(application, ct).ConfigureAwait(false);
-            return new MiyaServer(
+            return new Server(
                 server,
                 host,
                 GetListeningAddresses(server),
@@ -191,8 +191,8 @@ public partial class App<TContext>
 
     private static void ConfigureListenOptions(
         ListenOptions listenOptions,
-        MiyaOptions options,
-        MiyaProtocols protocols,
+        Options options,
+        Protocols protocols,
         ILoggerFactory loggerFactory)
     {
         listenOptions.Protocols = ToKestrelProtocols(protocols);
@@ -212,20 +212,20 @@ public partial class App<TContext>
         listenOptions.UseHttps(options.Certificate);
     }
 
-    private static HttpProtocols ToKestrelProtocols(MiyaProtocols protocols)
+    private static HttpProtocols ToKestrelProtocols(Protocols protocols)
     {
         var result = HttpProtocols.None;
-        if ((protocols & MiyaProtocols.Http1) != 0)
+        if ((protocols & Protocols.Http1) != 0)
         {
             result |= HttpProtocols.Http1;
         }
 
-        if ((protocols & MiyaProtocols.Http2) != 0)
+        if ((protocols & Protocols.Http2) != 0)
         {
             result |= HttpProtocols.Http2;
         }
 
-        if ((protocols & MiyaProtocols.Http3) != 0)
+        if ((protocols & Protocols.Http3) != 0)
         {
             result |= HttpProtocols.Http3;
         }
@@ -314,7 +314,7 @@ public partial class App<TContext>
     }
 
     private static async Task WaitForShutdownRequestAsync(
-        MiyaServer server,
+        Server server,
         CancellationToken cancellationToken)
     {
         var shutdown = new ShutdownSignal();
@@ -369,7 +369,7 @@ public partial class App<TContext>
 /// <summary>
 /// Represents a running Miya Kestrel server.
 /// </summary>
-public sealed class MiyaServer : IAsyncDisposable
+public sealed class Server : IAsyncDisposable
 {
     private readonly IServer _server;
     private readonly IDisposable _owner;
@@ -378,7 +378,7 @@ public sealed class MiyaServer : IAsyncDisposable
     private readonly object _sync = new();
     private Task? _stopTask;
 
-    internal MiyaServer(
+    internal Server(
         IServer server,
         IDisposable owner,
         string[] addresses,
@@ -388,7 +388,7 @@ public sealed class MiyaServer : IAsyncDisposable
         _server = server;
         _owner = owner;
         _shutdownTimeout = shutdownTimeout;
-        _logger = loggerFactory.CreateLogger<MiyaServer>();
+        _logger = loggerFactory.CreateLogger<Server>();
         Addresses = new ReadOnlyCollection<string>(addresses);
     }
 
@@ -462,12 +462,12 @@ internal sealed class KestrelApplication<TContext> : IHttpApplication<TContext>
     where TContext : Context, new()
 {
     private readonly App<TContext> _app;
-    private readonly MiyaOptions _options;
+    private readonly Options _options;
     private readonly Handler<TContext> _handler;
 
     public KestrelApplication(
         App<TContext> app,
-        MiyaOptions options,
+        Options options,
         Handler<TContext> handler)
     {
         _app = app;

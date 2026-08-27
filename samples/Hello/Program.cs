@@ -19,7 +19,7 @@ app.Get("/users/:id", static context => context.Json(new User(context.Param("id"
 app.Post("/users", static async context =>
 {
     var user = await context.Req.Json<User>()
-        ?? throw new MiyaJsonException("A user is required.");
+        ?? throw new JsonException("A user is required.");
     await context.Json(user);
 });
 
