@@ -307,45 +307,49 @@ The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389
 
 ### MiyaJson and System.Text.Json
 
-Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, and `UnsafeRelaxedJsonEscaping`. The buffer-growth case created a 16-byte buffer inside each operation. Miya had a lower mean in all eight scenarios for both JIT and NativeAOT in this run, with managed allocation no greater than System.Text.Json.
+The serializer measurements were repeated on 2026-08-27 using the Apple M5, macOS arm64, and .NET 10 environment listed above. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `MiyaJson.Serialize` and `MiyaJson.Deserialize` overloads. No benchmark-specific codecs were used.
+
+Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, `UnsafeRelaxedJsonEscaping`, required-member checks, and nullable-annotation checks. Request JSON was prepared before the measured interval, and setup verified that both serializers rejected a missing required property and a null value for its non-nullable property. The buffer-growth case created a 16-byte buffer inside each operation.
+
+The pass condition requires Miya's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. This run did not pass. Miya had a higher JIT mean for the small DTO and a higher NativeAOT mean for the list of 100 DTOs. Allocated bytes were no greater than System.Text.Json in every scenario.
 
 JIT results:
 
 | Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
-| Small DTO | 63.11 ns | 112.88 ns | 0 B | 0 B |
-| List of 100 DTOs | 5,283.87 ns | 6,108.42 ns | 0 B | 0 B |
-| Nested DTO | 176.06 ns | 293.96 ns | 0 B | 0 B |
-| Escape-heavy string | 1,725.07 ns | 2,014.96 ns | 0 B | 0 B |
-| 32 KiB string | 3,928.59 ns | 5,434.11 ns | 0 B | 0 B |
-| Integer-centric DTO | 1,411.92 ns | 2,099.14 ns | 0 B | 0 B |
-| Request binding | 707.40 ns | 1,370.01 ns | 280 B | 872 B |
-| Buffer growth | 5,877.56 ns | 19,294.78 ns | 32,880 B | 98,591 B |
+| Small DTO | 84.45 ns | 71.67 ns | 0 B | 0 B |
+| List of 100 DTOs | 7,646.28 ns | 8,972.98 ns | 0 B | 0 B |
+| Nested DTO | 217.65 ns | 277.78 ns | 0 B | 0 B |
+| Escape-heavy string | 2,049.76 ns | 2,467.25 ns | 0 B | 0 B |
+| 32 KiB string | 3,629.09 ns | 4,072.37 ns | 0 B | 0 B |
+| Integer-centric DTO | 1,949.20 ns | 3,130.27 ns | 0 B | 0 B |
+| Request binding | 748.90 ns | 1,733.15 ns | 280 B | 872 B |
+| Buffer growth | 5,880.04 ns | 16,438.11 ns | 32,880 B | 98,592 B |
 
 NativeAOT results:
 
 | Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
-| Small DTO | 112.77 ns | 244.16 ns | 0 B | 0 B |
-| List of 100 DTOs | 4,349.10 ns | 5,695.19 ns | 0 B | 0 B |
-| Nested DTO | 253.70 ns | 387.15 ns | 0 B | 0 B |
-| Escape-heavy string | 1,761.24 ns | 2,594.15 ns | 0 B | 0 B |
-| 32 KiB string | 3,591.44 ns | 6,385.38 ns | 0 B | 0 B |
-| Integer-centric DTO | 1,690.97 ns | 2,644.45 ns | 0 B | 0 B |
-| Request binding | 889.49 ns | 1,645.63 ns | 280 B | 872 B |
-| Buffer growth | 4,102.76 ns | 14,172.04 ns | 32,880 B | 98,602 B |
+| Small DTO | 61.86 ns | 111.74 ns | 0 B | 0 B |
+| List of 100 DTOs | 5,840.13 ns | 5,391.82 ns | 0 B | 0 B |
+| Nested DTO | 243.39 ns | 279.16 ns | 0 B | 0 B |
+| Escape-heavy string | 1,971.72 ns | 2,102.88 ns | 0 B | 0 B |
+| 32 KiB string | 4,218.26 ns | 4,788.54 ns | 0 B | 0 B |
+| Integer-centric DTO | 1,701.97 ns | 2,175.44 ns | 0 B | 0 B |
+| Request binding | 951.29 ns | 1,276.82 ns | 280 B | 872 B |
+| Buffer growth | 5,356.04 ns | 19,806.15 ns | 32,880 B | 98,599 B |
 
 SpanJson 4.2.1 was measured separately under JIT because its API returns a new `byte[]` rather than writing to the same `IBufferWriter<byte>` contract. It is a reference rather than the pass/fail baseline.
 
 | Scenario | SpanJson mean | Allocated |
 | --- | ---: | ---: |
-| Small DTO | 61.55 ns | 64 B |
-| List of 100 DTOs | 6,954.86 ns | 4,256 B |
-| Nested DTO | 227.89 ns | 168 B |
-| Escape-heavy string | 4,005.56 ns | 1,568 B |
-| 32 KiB string | 47,997.52 ns | 32,800 B |
-| Integer-centric DTO | 2,628.30 ns | 1,032 B |
-| Request binding | 204.78 ns | 280 B |
+| Small DTO | 50.71 ns | 64 B |
+| List of 100 DTOs | 8,266.02 ns | 4,256 B |
+| Nested DTO | 228.06 ns | 168 B |
+| Escape-heavy string | 5,593.79 ns | 1,568 B |
+| 32 KiB string | 39,181.72 ns | 32,800 B |
+| Integer-centric DTO | 6,726.19 ns | 1,032 B |
+| Request binding | 194.46 ns | 280 B |
 
 Miya's JIT mean was lower in five of these seven reference scenarios. SpanJson's mean was lower for the small DTO and request-binding cases.
 
@@ -371,6 +375,7 @@ The pipeline benchmark uses the same harness and a static route handler.
 The benchmark commands were:
 
 ```sh
+dotnet build benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj -c Release
 MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
   --project benchmarks/Miya.Benchmarks
 MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
