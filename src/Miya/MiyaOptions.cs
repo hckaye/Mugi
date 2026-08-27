@@ -1,5 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Miya.Json;
 
@@ -43,6 +44,14 @@ public sealed class MiyaOptions
     /// Configure TLS through <see cref="Certificate"/> and protocols through <see cref="Protocols"/>.
     /// </summary>
     public Action<KestrelServerOptions>? ConfigureKestrel { get; init; }
+
+    /// <summary>
+    /// Optional service registration for the internal Kestrel host. Miya never requires dependency
+    /// injection; this hook exists for advanced Kestrel customization only. Setting it selects the
+    /// service-backed hosting path even for cleartext endpoints. The registered services stay inside
+    /// the server and are not exposed to handlers or middleware.
+    /// </summary>
+    public Action<IServiceCollection>? ConfigureServices { get; init; }
 
     public int MaxBufferedResponseBytes { get; init; } = 1024 * 1024;
 

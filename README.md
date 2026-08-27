@@ -288,6 +288,8 @@ Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `Qui
 
 `ConfigureKestrel` remains available for other supported Kestrel settings. Certificate selection belongs in `MiyaOptions.Certificate`; Miya does not search for a development certificate or load Kestrel endpoint configuration files.
 
+`MiyaOptions.ConfigureServices` registers additional services in the internal Kestrel host. Miya never requires dependency injection; this hook exists for advanced Kestrel customization. Setting it selects the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
+
 ## Measured results
 
 Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, macOS Tahoe 26.5.2, .NET SDK 10.0.203, and .NET runtime 10.0.7 arm64. BenchmarkDotNet 0.15.8 used concurrent workstation GC, one launch, five warmup iterations, and ten measured iterations. The host was not otherwise isolated, so the error and standard-deviation columns in the generated BenchmarkDotNet reports should be considered when comparing close results.

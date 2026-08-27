@@ -36,6 +36,27 @@ public sealed class KestrelIntegrationTests
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ConfigureServicesUsesServiceBackedHostForCleartext()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        var configured = false;
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+            ConfigureServices = _ => configured = true,
+        });
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/");
+
+        Assert.True(configured);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
     public async Task MissingRouteReturnsNotFound()
     {
         var app = new App();

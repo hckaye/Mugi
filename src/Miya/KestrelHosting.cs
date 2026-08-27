@@ -90,7 +90,7 @@ public partial class App<TContext>
             port = FindAvailableTcpAndUdpPort();
         }
 
-        return effectiveOptions.Certificate is null
+        return effectiveOptions.Certificate is null && effectiveOptions.ConfigureServices is null
             ? await StartDirectAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false)
             : await StartServiceBackedAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false);
     }
@@ -150,7 +150,11 @@ public partial class App<TContext>
         {
             host = new HostBuilder()
                 .ConfigureWebHost(webHost => webHost
-                    .ConfigureServices(services => services.AddSingleton(loggerFactory))
+                    .ConfigureServices(services =>
+                    {
+                        services.AddSingleton(loggerFactory);
+                        options.ConfigureServices?.Invoke(services);
+                    })
                     .UseKestrel(kestrelOptions =>
                     {
                         kestrelOptions.Listen(
