@@ -11,12 +11,15 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
-    <ProjectReference Include="../Miya.Generators.Core/Miya.Generators.Core.csproj" PrivateAssets="all" />
+    <Compile Include="../Miya.Generators.Core/**/*.cs"
+             Exclude="../Miya.Generators.Core/bin/**/*.cs;../Miya.Generators.Core/obj/**/*.cs"
+             LinkBase="Miya.Generators.Core" />
+    <AdditionalFiles Include="../Miya.Generators.Core/AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="../Miya.Generators.Core/AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
-    <None Include="$(OutputPath)Miya.Generators.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
     <None Include="buildTransitive/Miya.Generators.props" Pack="true" PackagePath="buildTransitive/Miya.Generators.props" />
   </ItemGroup>
 

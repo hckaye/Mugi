@@ -27,7 +27,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Miya.Generators\Miya.Generators.csproj" />
-    <ProjectReference Include="..\..\src\Miya.Generators.Core\Miya.Generators.Core.csproj" />
     <ProjectReference Include="..\..\src\Miya.Json\Miya.Json.csproj" />
     <ProjectReference Include="..\..\src\Miya\Miya.csproj" />
   </ItemGroup>

@@ -25,7 +25,10 @@ dotnet pack "$repository_root/src/Miya.Generators/Miya.Generators.csproj" -c Rel
     -p:PackageVersion=1.0.0 -p:PackageOutputPath="$packages_dir"
 
 unzip -l "$packages_dir/Miya.Generators.1.0.0.nupkg" | grep 'analyzers/dotnet/cs/Miya.Generators.dll'
-unzip -l "$packages_dir/Miya.Generators.1.0.0.nupkg" | grep 'analyzers/dotnet/cs/Miya.Generators.Core.dll'
+if unzip -l "$packages_dir/Miya.Generators.1.0.0.nupkg" | grep 'analyzers/dotnet/cs/Miya.Generators.Core.dll'; then
+    echo "Miya.Generators must contain a single analyzer assembly." >&2
+    exit 1
+fi
 unzip -l "$packages_dir/Miya.Generators.1.0.0.nupkg" | grep 'buildTransitive/Miya.Generators.props'
 if unzip -p "$packages_dir/Miya.Generators.1.0.0.nupkg" '*.nuspec' | grep 'Microsoft.CodeAnalysis'; then
     echo "Miya.Generators must not expose Roslyn package dependencies." >&2

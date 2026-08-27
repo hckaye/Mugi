@@ -25,11 +25,11 @@ An application using locally packed or published packages needs the runtime and 
 </ItemGroup>
 ```
 
-The `Miya.Generators` package contains both analyzer assemblies and a `buildTransitive` props file. The props file adds the analyzer and `Miya.Generated` interceptor namespace, including when the package arrives through a project reference. The explicit `InterceptorsNamespaces` property above also works when switching between package and source references.
+The `Miya.Generators` package contains the analyzer assembly and a `buildTransitive` props file. The props file adds the analyzer and `Miya.Generated` interceptor namespace, including when the package arrives through a project reference. The explicit `InterceptorsNamespaces` property above also works when switching between package and source references.
 
 ### Project references
 
-Repository projects must expose both generator assemblies to the compiler because analyzer dependencies are not resolved like ordinary project references:
+Repository projects expose `Miya.Generators` to the compiler as an analyzer:
 
 ```xml
 <PropertyGroup>
@@ -41,9 +41,6 @@ Repository projects must expose both generator assemblies to the compiler becaus
 <ItemGroup>
   <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
   <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
-                    OutputItemType="Analyzer"
-                    ReferenceOutputAssembly="false" />
-  <ProjectReference Include="../Miya/src/Miya.Generators.Core/Miya.Generators.Core.csproj"
                     OutputItemType="Analyzer"
                     ReferenceOutputAssembly="false" />
 </ItemGroup>
