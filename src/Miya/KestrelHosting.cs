@@ -107,6 +107,8 @@ public partial class App<TContext>
             IPAddress.Loopback,
             port,
             listenOptions => ConfigureListenOptions(listenOptions, options, protocols, loggerFactory));
+        options.ConfigureKestrel?.Invoke(kestrelOptions);
+        kestrelOptions.Limits.MaxRequestBodySize = options.MaxRequestBodyBytes;
 
         var transportFactory = new SocketTransportFactory(
             Microsoft.Extensions.Options.Options.Create(new SocketTransportOptions()),
@@ -118,7 +120,6 @@ public partial class App<TContext>
 
         try
         {
-            options.ConfigureKestrel?.Invoke(kestrelOptions);
             var application = new KestrelApplication<TContext>(this, options, Build());
             await kestrel.StartAsync(application, ct).ConfigureAwait(false);
             return new MiyaServer(
@@ -166,6 +167,7 @@ public partial class App<TContext>
                                 protocols,
                                 loggerFactory));
                         options.ConfigureKestrel?.Invoke(kestrelOptions);
+                        kestrelOptions.Limits.MaxRequestBodySize = options.MaxRequestBodyBytes;
                     })
                     .Configure(static _ => { }))
                 .Build();

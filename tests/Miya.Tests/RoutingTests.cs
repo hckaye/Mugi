@@ -44,6 +44,47 @@ public sealed class RoutingTests
         Assert.Equal("a/b", response.BodyText);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task ParametersDecodeTheRawTargetExactlyOnce()
+    {
+        var app = new App();
+        app.Get("/users/:id", context => context.Text(context.Param("id")));
+
+        await using var response = await TestApp.Send(
+            app,
+            path: "/users/%FF",
+            rawTarget: "/users/%25FF");
+
+        Assert.Equal(StatusCodes.Status200OK, response.Response.StatusCode);
+        Assert.Equal("%FF", response.BodyText);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task InvalidUtf8RouteParameterReturnsBadRequest()
+    {
+        var app = new App();
+        app.Get("/users/:id", context => context.Text(context.Param("id")));
+
+        await using var response = await TestApp.Send(app, path: "/users/%FF");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.Response.StatusCode);
+        Assert.Equal("Bad Request", response.BodyText);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task Utf8RouteParameterIsDecoded()
+    {
+        var app = new App();
+        app.Get("/users/:id", context => context.Text(context.Param("id")));
+
+        await using var response = await TestApp.Send(
+            app,
+            path: "/users/日本",
+            rawTarget: "/users/%E6%97%A5%E6%9C%AC");
+
+        Assert.Equal("日本", response.BodyText);
+    }
+
     [Fact]
     public async Task InvalidPathEscapeReturnsBadRequest()
     {
@@ -81,6 +122,19 @@ public sealed class RoutingTests
         Assert.Equal(StatusCodes.Status405MethodNotAllowed, response.Response.StatusCode);
         Assert.Equal("GET, HEAD, POST, OPTIONS", response.Response.Headers.Allow.ToString());
         Assert.Empty(response.BodyText);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task MethodTokensAreCaseSensitive()
+    {
+        var app = new App();
+        app.Get("/resource", context => context.Text("get"));
+
+        await using var lowerCase = await TestApp.Send(app, method: "get", path: "/resource");
+        await using var upperCase = await TestApp.Send(app, method: "GET", path: "/resource");
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, lowerCase.Response.StatusCode);
+        Assert.Equal("get", upperCase.BodyText);
     }
 
     [Fact]

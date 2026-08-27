@@ -52,7 +52,7 @@ public partial class App<TContext>
     {
         ArgumentException.ThrowIfNullOrEmpty(method);
         ValidateMethod(method);
-        return AddRoute(method.ToUpperInvariant(), pattern, handler);
+        return AddRoute(method, pattern, handler);
     }
 
     public App<TContext> Route(string prefix, App<TContext> sub)
@@ -173,7 +173,7 @@ public partial class App<TContext>
         {
             for (var j = i + 1; j < _routes.Count; j++)
             {
-                if (string.Equals(_routes[i].Method, _routes[j].Method, StringComparison.OrdinalIgnoreCase)
+                if (string.Equals(_routes[i].Method, _routes[j].Method, StringComparison.Ordinal)
                     && string.Equals(
                         _routes[i].Pattern.Original,
                         _routes[j].Pattern.Original,
@@ -231,7 +231,7 @@ public partial class App<TContext>
         var status = exception switch
         {
             BadHttpRequestException badRequest => badRequest.StatusCode,
-            MiyaJsonException => StatusCodes.Status400BadRequest,
+            MiyaJsonException jsonException when jsonException.IsInputError => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError,
         };
 
@@ -271,6 +271,7 @@ internal sealed class ExecutionHandler<TContext>
 
     private async ValueTask Invoke(TContext context)
     {
+        using var executionScope = context.EnterExecutionScope();
         context.PrepareMiddlewareSlots(_middlewareCount);
         try
         {

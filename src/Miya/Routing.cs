@@ -99,8 +99,9 @@ internal sealed class RoutePattern
         }
 
         var position = 1;
-        foreach (var segment in Segments)
+        for (var segmentIndex = 0; segmentIndex < Segments.Length; segmentIndex++)
         {
+            var segment = Segments[segmentIndex];
             if (position > path.Length)
             {
                 return false;
@@ -110,7 +111,11 @@ internal sealed class RoutePattern
             {
                 if (captures.Length > segment.ParameterIndex)
                 {
-                    captures[segment.ParameterIndex] = new ParameterCapture(position, path.Length - position);
+                    captures[segment.ParameterIndex] = new ParameterCapture(
+                        position,
+                        path.Length - position,
+                        segmentIndex,
+                        IsWildcard: true);
                 }
 
                 return true;
@@ -137,7 +142,11 @@ internal sealed class RoutePattern
 
                 if (captures.Length > segment.ParameterIndex)
                 {
-                    captures[segment.ParameterIndex] = new ParameterCapture(position, length);
+                    captures[segment.ParameterIndex] = new ParameterCapture(
+                        position,
+                        length,
+                        segmentIndex,
+                        IsWildcard: false);
                 }
             }
 
@@ -226,9 +235,9 @@ internal sealed class Router<TContext>
     {
         _routes = [.. routes];
         _notFound = notFound;
-        _methods = new Dictionary<string, MethodBuckets>(StringComparer.OrdinalIgnoreCase);
+        _methods = new Dictionary<string, MethodBuckets>(StringComparer.Ordinal);
 
-        var builders = new Dictionary<string, MethodBucketBuilder>(StringComparer.OrdinalIgnoreCase);
+        var builders = new Dictionary<string, MethodBucketBuilder>(StringComparer.Ordinal);
         foreach (var route in routes)
         {
             if (!builders.TryGetValue(route.Method, out var builder))
@@ -262,7 +271,7 @@ internal sealed class Router<TContext>
         var method = context.Req.Method;
 
         RouteEntry<TContext>? route;
-        if (string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "HEAD", StringComparison.Ordinal))
         {
             route = FindRoute("HEAD", path, segmentCount, context, includeAll: true)
                 ?? FindRoute("GET", path, segmentCount, context, includeAll: false);
@@ -288,7 +297,7 @@ internal sealed class Router<TContext>
         var allowValue = FormatAllow(allowed);
         context.Header("Allow", allowValue);
         context.SetEmptyBody();
-        if (string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "OPTIONS", StringComparison.Ordinal))
         {
             context.Status(StatusCodes.Status204NoContent);
         }
@@ -387,7 +396,7 @@ internal sealed class Router<TContext>
 
     private List<string> GetAllowedMethods(string path, TContext context)
     {
-        var methods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var methods = new HashSet<string>(StringComparer.Ordinal);
         foreach (var route in _routes)
         {
             if (route.Method == AllMethods)
@@ -401,7 +410,7 @@ internal sealed class Router<TContext>
             }
 
             methods.Add(route.Method);
-            if (string.Equals(route.Method, "GET", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(route.Method, "GET", StringComparison.Ordinal))
             {
                 methods.Add("HEAD");
             }

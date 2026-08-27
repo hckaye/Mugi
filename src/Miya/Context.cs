@@ -14,9 +14,13 @@ namespace Miya;
 public class Context
 {
     private static readonly MiyaOptions DefaultOptions = new();
+    private static readonly AsyncLocal<RequestLease?> CurrentLease = new();
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     private readonly HeaderDictionary _headers = new();
     private readonly PooledByteBufferWriter _buffer = new();
+    private readonly CountingBufferWriter _measurementWriter;
+    private readonly Request _request;
     private readonly ResponseBufferWriter _responseWriter;
     private IFeatureCollection? _features;
     private IHttpResponseFeature? _responseFeature;
@@ -29,25 +33,62 @@ public class Context
     private ParameterCapture[] _parameterCaptures = [];
     private int _parameterCount;
     private int[] _middlewareCalls = [];
+    private long _generationCounter;
+    private long _activeGeneration;
+    private long _suppressedBodyLength;
 
     public Context()
     {
-        Req = new Request(this);
+        _request = new Request(this);
         _responseWriter = new ResponseBufferWriter(this);
+        _measurementWriter = new CountingBufferWriter();
     }
 
-    public Request Req { get; }
+    public Request Req
+    {
+        get
+        {
+            EnsureActive();
+            return _request;
+        }
+    }
 
-    public bool ResponseStarted =>
-        _responseState is ResponseState.Streaming or ResponseState.Sent or ResponseState.Aborted
-        || (_responseFeature?.HasStarted ?? false);
+    public bool ResponseStarted
+    {
+        get
+        {
+            EnsureActive();
+            return _responseState is ResponseState.Streaming or ResponseState.Sent or ResponseState.Aborted
+                || (_responseFeature?.HasStarted ?? false);
+        }
+    }
 
-    public CancellationToken Aborted => _lifetimeFeature?.RequestAborted ?? CancellationToken.None;
+    public CancellationToken Aborted
+    {
+        get
+        {
+            EnsureActive();
+            return _lifetimeFeature?.RequestAborted ?? CancellationToken.None;
+        }
+    }
 
-    internal IFeatureCollection Features =>
-        _features ?? throw new InvalidOperationException("The context is not attached to a request.");
+    internal IFeatureCollection Features
+    {
+        get
+        {
+            EnsureActive();
+            return _features!;
+        }
+    }
 
-    internal MiyaOptions Options => _options;
+    internal MiyaOptions Options
+    {
+        get
+        {
+            EnsureActive();
+            return _options;
+        }
+    }
 
     internal bool IsAborted => _responseState == ResponseState.Aborted;
 
@@ -59,20 +100,7 @@ public class Context
         {
             if (string.Equals(_parameterNames![i], name, StringComparison.Ordinal))
             {
-                var capture = _parameterCaptures[i];
-                var value = Req.Path.AsSpan(capture.Start, capture.Length);
-                ValidatePercentEscapes(value);
-                try
-                {
-                    return Uri.UnescapeDataString(value.ToString());
-                }
-                catch (UriFormatException exception)
-                {
-                    throw new BadHttpRequestException(
-                        "The route parameter contains an invalid escape sequence.",
-                        StatusCodes.Status400BadRequest,
-                        exception);
-                }
+                return _request.GetRouteParameter(_parameterCaptures[i]);
             }
         }
 
@@ -90,6 +118,11 @@ public class Context
         }
 
         _statusCode = code;
+        if (IsContentLengthForbidden())
+        {
+            _buffer.Clear();
+            _suppressedBodyLength = 0;
+        }
     }
 
     public void Header(string name, string value)
@@ -110,9 +143,15 @@ public class Context
 
     public ValueTask Text(string value)
     {
+        EnsureActive();
         ArgumentNullException.ThrowIfNull(value);
-        BeginBufferedBody("text/plain; charset=utf-8");
         var byteCount = Encoding.UTF8.GetByteCount(value);
+        BeginBufferedBody("text/plain; charset=utf-8");
+        if (SuppressMeasuredBody(byteCount))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         var destination = _responseWriter.GetSpan(byteCount);
         var written = Encoding.UTF8.GetBytes(value, destination);
         _responseWriter.Advance(written);
@@ -121,9 +160,15 @@ public class Context
 
     public ValueTask Html(string value)
     {
+        EnsureActive();
         ArgumentNullException.ThrowIfNull(value);
-        BeginBufferedBody("text/html; charset=utf-8");
         var byteCount = Encoding.UTF8.GetByteCount(value);
+        BeginBufferedBody("text/html; charset=utf-8");
+        if (SuppressMeasuredBody(byteCount))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         var destination = _responseWriter.GetSpan(byteCount);
         var written = Encoding.UTF8.GetBytes(value, destination);
         _responseWriter.Advance(written);
@@ -132,23 +177,67 @@ public class Context
 
     public ValueTask Bytes(ReadOnlyMemory<byte> data, string contentType)
     {
+        EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(contentType);
         BeginBufferedBody(contentType);
+        if (SuppressMeasuredBody(data.Length))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         _responseWriter.Write(data.Span);
         return FinishBodyWrite();
     }
 
     public ValueTask Json<T>(T value)
     {
+        EnsureBodyMutable();
+        var codec = MiyaJson.GetCodec<T>();
+        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
+        long measuredLength;
+        try
+        {
+            MiyaJson.Serialize(_measurementWriter, value, codec, _options.Json);
+            measuredLength = _measurementWriter.WrittenCount;
+        }
+        finally
+        {
+            _measurementWriter.Release();
+        }
+
         BeginBufferedBody("application/json; charset=utf-8");
-        MiyaJson.Serialize(_responseWriter, value, _options.Json);
+        if (SuppressMeasuredBody(measuredLength))
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        MiyaJson.Serialize(_responseWriter, value, codec, _options.Json);
         return FinishBodyWrite();
     }
 
     public ValueTask Json<T>(T value, IMiyaJsonCodec<T> codec)
     {
+        EnsureActive();
         ArgumentNullException.ThrowIfNull(codec);
+        EnsureBodyMutable();
+        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
+        long measuredLength;
+        try
+        {
+            MiyaJson.Serialize(_measurementWriter, value, codec, _options.Json);
+            measuredLength = _measurementWriter.WrittenCount;
+        }
+        finally
+        {
+            _measurementWriter.Release();
+        }
+
         BeginBufferedBody("application/json; charset=utf-8");
+        if (SuppressMeasuredBody(measuredLength))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         var writer = new MiyaJsonWriter(_responseWriter, _options.Json);
         codec.Write(ref writer, value);
         writer.Flush();
@@ -157,8 +246,29 @@ public class Context
 
     public ValueTask Json<T>(T value, JsonTypeInfo<T> typeInfo)
     {
+        EnsureActive();
         ArgumentNullException.ThrowIfNull(typeInfo);
+        EnsureBodyMutable();
+        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
+        long measuredLength;
+        try
+        {
+            using var measurementJsonWriter = new Utf8JsonWriter(_measurementWriter);
+            JsonSerializer.Serialize(measurementJsonWriter, value, typeInfo);
+            measurementJsonWriter.Flush();
+            measuredLength = _measurementWriter.WrittenCount;
+        }
+        finally
+        {
+            _measurementWriter.Release();
+        }
+
         BeginBufferedBody("application/json; charset=utf-8");
+        if (SuppressMeasuredBody(measuredLength))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         using var writer = new Utf8JsonWriter(_responseWriter);
         JsonSerializer.Serialize(writer, value, typeInfo);
         writer.Flush();
@@ -169,10 +279,12 @@ public class Context
         string contentType,
         Func<PipeWriter, CancellationToken, ValueTask> write)
     {
+        EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(contentType);
         ArgumentNullException.ThrowIfNull(write);
         EnsureBodyMutable();
         _buffer.Clear();
+        _suppressedBodyLength = 0;
         SetFrameworkHeader("Content-Type", contentType);
         _responseState = ResponseState.Streaming;
         ApplyResponseHead(contentLength: null);
@@ -202,12 +314,14 @@ public class Context
 
     public ValueTask Redirect(string location, int status = StatusCodes.Status302Found)
     {
+        EnsureActive();
         ArgumentNullException.ThrowIfNull(location);
         if (status is < 300 or > 399)
         {
             throw new ArgumentOutOfRangeException(nameof(status), "Redirect status codes must be between 300 and 399.");
         }
 
+        ValidateLocation(location);
         Status(status);
         Header("Location", location);
         SetEmptyBody();
@@ -230,6 +344,13 @@ public class Context
 
         _options = options ?? DefaultOptions;
         _options.Validate();
+        _generationCounter = unchecked(_generationCounter + 1);
+        if (_generationCounter == 0)
+        {
+            _generationCounter = 1;
+        }
+
+        _activeGeneration = _generationCounter;
         _features = features;
         _responseFeature = features.Get<IHttpResponseFeature>()
             ?? throw new InvalidOperationException("IHttpResponseFeature is required.");
@@ -238,17 +359,20 @@ public class Context
         _statusCode = _responseFeature.StatusCode;
         _headers.Clear();
         _buffer.Clear();
+        _suppressedBodyLength = 0;
         _responseState = ResponseState.Empty;
         _parameterNames = null;
         _parameterCount = 0;
         Array.Clear(_middlewareCalls);
-        Req.Reset();
+        _request.Reset();
+        ApplyRequestBodyLimit(features, _options.MaxRequestBodyBytes);
     }
 
     internal void ResetFrameworkState(bool retainBuffers)
     {
         var maxRetainedBufferBytes = _options.MaxRetainedBufferBytes;
-        Req.Reset();
+        _request.Reset();
+        _activeGeneration = 0;
         _features = null;
         _responseFeature = null;
         _responseBodyFeature = null;
@@ -260,6 +384,7 @@ public class Context
         Array.Clear(_middlewareCalls);
         _responseState = ResponseState.Empty;
         _statusCode = StatusCodes.Status200OK;
+        _suppressedBodyLength = 0;
 
         if (retainBuffers)
         {
@@ -317,6 +442,7 @@ public class Context
     {
         EnsureBodyMutable();
         _buffer.Clear();
+        _suppressedBodyLength = 0;
         _responseState = ResponseState.Empty;
     }
 
@@ -328,6 +454,7 @@ public class Context
         }
 
         _buffer.Clear();
+        _suppressedBodyLength = 0;
         _headers.Clear();
         _statusCode = StatusCodes.Status200OK;
         _responseState = ResponseState.Empty;
@@ -346,20 +473,20 @@ public class Context
             return;
         }
 
-        var bodyLength = _responseState == ResponseState.Buffered ? _buffer.WrittenCount : 0;
+        var bufferedBodyLength = _responseState == ResponseState.Buffered ? _buffer.WrittenCount : 0;
         var suppress = ShouldSuppressBody();
         long? contentLength = IsContentLengthForbidden()
             ? null
-            : string.Equals(Req.Method, "HEAD", StringComparison.OrdinalIgnoreCase)
-                ? bodyLength
+            : string.Equals(Req.Method, "HEAD", StringComparison.Ordinal)
+                ? _suppressedBodyLength
                 : suppress
                     ? null
-                    : bodyLength;
+                    : bufferedBodyLength;
 
         ApplyResponseHead(contentLength);
         try
         {
-            if (!suppress && bodyLength > 0)
+            if (!suppress && bufferedBodyLength > 0)
             {
                 await ResponseBodyFeature.StartAsync(Aborted).ConfigureAwait(false);
                 ResponseBodyFeature.Writer.Write(_buffer.WrittenMemory.Span);
@@ -413,10 +540,89 @@ public class Context
     private static bool IsHex(char value) =>
         value is >= '0' and <= '9' or >= 'A' and <= 'F' or >= 'a' and <= 'f';
 
+    internal static string DecodePercentEncoded(
+        ReadOnlySpan<char> value,
+        bool plusAsSpace,
+        string errorMessage)
+    {
+        ValidatePercentEscapes(value);
+        ValidateUnicode(value, errorMessage);
+        if (value.IndexOf('%') < 0 && (!plusAsSpace || value.IndexOf('+') < 0))
+        {
+            return value.ToString();
+        }
+
+        var result = new StringBuilder(value.Length);
+        Span<byte> stackBytes = stackalloc byte[256];
+        var position = 0;
+        while (position < value.Length)
+        {
+            if (plusAsSpace && value[position] == '+')
+            {
+                result.Append(' ');
+                position++;
+                continue;
+            }
+
+            if (value[position] != '%')
+            {
+                result.Append(value[position]);
+                position++;
+                continue;
+            }
+
+            var end = position;
+            var byteCount = 0;
+            while (end < value.Length && value[end] == '%')
+            {
+                byteCount++;
+                end += 3;
+            }
+
+            Span<byte> bytes = byteCount <= stackBytes.Length
+                ? stackBytes[..byteCount]
+                : new byte[byteCount];
+            for (var index = 0; index < byteCount; index++)
+            {
+                var escape = position + (index * 3);
+                bytes[index] = (byte)((HexValue(value[escape + 1]) << 4) | HexValue(value[escape + 2]));
+            }
+
+            try
+            {
+                result.Append(StrictUtf8.GetString(bytes));
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new BadHttpRequestException(
+                    errorMessage,
+                    StatusCodes.Status400BadRequest,
+                    exception);
+            }
+
+            position = end;
+        }
+
+        return result.ToString();
+    }
+
+    internal ExecutionScope EnterExecutionScope()
+    {
+        if (_features is null || _activeGeneration == 0)
+        {
+            throw new ObjectDisposedException(nameof(Context), "The context is not attached to an active request.");
+        }
+
+        var previous = CurrentLease.Value;
+        CurrentLease.Value = new RequestLease(this, _activeGeneration);
+        return new ExecutionScope(previous);
+    }
+
     private void BeginBufferedBody(string contentType)
     {
         EnsureBodyMutable();
         _buffer.Clear();
+        _suppressedBodyLength = 0;
         SetFrameworkHeader("Content-Type", contentType);
         _responseState = ResponseState.Buffered;
     }
@@ -457,9 +663,13 @@ public class Context
 
         _responseState = ResponseState.Streaming;
         ApplyResponseHead(contentLength: null);
-        if (_buffer.WrittenCount > 0)
+        var writtenCount = _buffer.WrittenCount;
+        if (writtenCount > 0)
         {
-            ResponseBodyFeature.Writer.Write(_buffer.WrittenMemory.Span);
+            var writer = ResponseBodyFeature.Writer;
+            var destination = writer.GetSpan(writtenCount);
+            _buffer.WrittenMemory.Span.CopyTo(destination);
+            writer.Advance(writtenCount);
             _buffer.Clear();
         }
     }
@@ -474,8 +684,24 @@ public class Context
         return sizeHint > _options.MaxBufferedResponseBytes - _buffer.WrittenCount;
     }
 
+    private bool SuppressMeasuredBody(long bodyLength)
+    {
+        if (!ShouldSuppressBody())
+        {
+            return false;
+        }
+
+        if (!IsContentLengthForbidden()
+            && string.Equals(Req.Method, "HEAD", StringComparison.Ordinal))
+        {
+            _suppressedBodyLength = bodyLength;
+        }
+
+        return true;
+    }
+
     private bool ShouldSuppressBody() =>
-        string.Equals(Req.Method, "HEAD", StringComparison.OrdinalIgnoreCase)
+        string.Equals(Req.Method, "HEAD", StringComparison.Ordinal)
         || IsContentLengthForbidden();
 
     private bool IsContentLengthForbidden() =>
@@ -539,11 +765,123 @@ public class Context
         _headers[name] = value;
     }
 
-    private void EnsureActive()
+    internal void EnsureActive()
     {
-        if (_features is null)
+        var lease = CurrentLease.Value;
+        if (_features is null
+            || _activeGeneration == 0
+            || lease is null
+            || !ReferenceEquals(lease.Context, this)
+            || lease.Generation != _activeGeneration)
         {
             throw new ObjectDisposedException(nameof(Context), "The context is not attached to an active request.");
+        }
+    }
+
+    private static void ApplyRequestBodyLimit(IFeatureCollection features, int limit)
+    {
+        var feature = features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (feature is null || feature.IsReadOnly)
+        {
+            return;
+        }
+
+        if (!feature.MaxRequestBodySize.HasValue || feature.MaxRequestBodySize.Value > limit)
+        {
+            feature.MaxRequestBodySize = limit;
+        }
+    }
+
+    private static int HexValue(char value) => value switch
+    {
+        >= '0' and <= '9' => value - '0',
+        >= 'A' and <= 'F' => value - 'A' + 10,
+        _ => value - 'a' + 10,
+    };
+
+    private static void ValidateUnicode(ReadOnlySpan<char> value, string errorMessage)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (!char.IsSurrogate(character))
+            {
+                continue;
+            }
+
+            if (!char.IsHighSurrogate(character)
+                || index + 1 >= value.Length
+                || !char.IsLowSurrogate(value[index + 1]))
+            {
+                throw new BadHttpRequestException(errorMessage, StatusCodes.Status400BadRequest);
+            }
+
+            index++;
+        }
+    }
+
+    private static void ValidateLocation(string location)
+    {
+        if (location.Length == 0)
+        {
+            throw new ArgumentException("The redirect location must not be empty.", nameof(location));
+        }
+
+        for (var index = 0; index < location.Length; index++)
+        {
+            var character = location[index];
+            if (char.IsWhiteSpace(character)
+                || char.IsControl(character)
+                || character is '\\' or '<' or '>' or '"' or '{' or '}' or '|' or '^' or '`')
+            {
+                throw new ArgumentException("The redirect location is not a valid URI reference.", nameof(location));
+            }
+
+            if (character == '%'
+                && (index + 2 >= location.Length
+                    || !IsHex(location[index + 1])
+                    || !IsHex(location[index + 2])))
+            {
+                throw new ArgumentException("The redirect location contains an invalid percent escape.", nameof(location));
+            }
+
+            if (character == '%')
+            {
+                index += 2;
+                continue;
+            }
+
+            if (!char.IsSurrogate(character))
+            {
+                continue;
+            }
+
+            if (!char.IsHighSurrogate(character)
+                || index + 1 >= location.Length
+                || !char.IsLowSurrogate(location[index + 1]))
+            {
+                throw new ArgumentException("The redirect location contains invalid Unicode.", nameof(location));
+            }
+
+            index++;
+        }
+
+        if (Uri.TryCreate(location, UriKind.Absolute, out var absoluteUri))
+        {
+            if (!absoluteUri.IsWellFormedOriginalString())
+            {
+                throw new ArgumentException("The redirect location is not a valid URI reference.", nameof(location));
+            }
+
+            return;
+        }
+
+        var firstDelimiter = location.IndexOfAny('/', '?', '#');
+        var colon = location.IndexOf(':');
+        if ((colon >= 0 && (firstDelimiter < 0 || colon < firstDelimiter))
+            || !Uri.TryCreate(location, UriKind.Relative, out _))
+        {
+            throw new ArgumentException("The redirect location is not a valid URI reference.", nameof(location));
         }
     }
 
@@ -587,6 +925,97 @@ public class Context
         }
     }
 
+    internal readonly struct ExecutionScope : IDisposable
+    {
+        private readonly RequestLease? _previous;
+
+        internal ExecutionScope(RequestLease? previous)
+        {
+            _previous = previous;
+        }
+
+        public void Dispose()
+        {
+            CurrentLease.Value = _previous;
+        }
+    }
+
+    internal sealed record RequestLease(Context Context, long Generation);
+
+    private sealed class CountingBufferWriter : IBufferWriter<byte>
+    {
+        private int _maxPooledBufferByteLength;
+        private byte[]? _buffer;
+        private int _available;
+
+        public long WrittenCount { get; private set; }
+
+        public void Reset(int maxPooledBufferByteLength)
+        {
+            _maxPooledBufferByteLength = maxPooledBufferByteLength;
+            WrittenCount = 0;
+            _available = 0;
+        }
+
+        public void Advance(int count)
+        {
+            if (count < 0 || count > _available)
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+
+            WrittenCount = checked(WrittenCount + count);
+            _available = 0;
+        }
+
+        public Memory<byte> GetMemory(int sizeHint = 0)
+        {
+            EnsureCapacity(sizeHint);
+            _available = _buffer!.Length;
+            return _buffer;
+        }
+
+        public Span<byte> GetSpan(int sizeHint = 0)
+        {
+            EnsureCapacity(sizeHint);
+            _available = _buffer!.Length;
+            return _buffer;
+        }
+
+        public void Release()
+        {
+            if (_buffer is not null && _buffer.Length <= _maxPooledBufferByteLength)
+            {
+                ArrayPool<byte>.Shared.Return(_buffer);
+            }
+
+            _buffer = null;
+            _available = 0;
+        }
+
+        private void EnsureCapacity(int sizeHint)
+        {
+            if (sizeHint < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sizeHint));
+            }
+
+            var required = Math.Max(sizeHint, 256);
+            if (_buffer is not null && _buffer.Length >= required)
+            {
+                return;
+            }
+
+            var replacement = ArrayPool<byte>.Shared.Rent(required);
+            if (_buffer is not null && _buffer.Length <= _maxPooledBufferByteLength)
+            {
+                ArrayPool<byte>.Shared.Return(_buffer);
+            }
+
+            _buffer = replacement;
+        }
+    }
+
     private sealed class ResponseBufferWriter : IBufferWriter<byte>
     {
         private readonly Context _context;
@@ -618,11 +1047,6 @@ public class Context
             }
 
             var memory = _context._buffer.GetMemory(sizeHint);
-            if (_context.ShouldSuppressBody())
-            {
-                return memory;
-            }
-
             var remaining = _context._options.MaxBufferedResponseBytes - _context._buffer.WrittenCount;
             return memory[..Math.Min(memory.Length, remaining)];
         }
@@ -636,11 +1060,6 @@ public class Context
             }
 
             var span = _context._buffer.GetSpan(sizeHint);
-            if (_context.ShouldSuppressBody())
-            {
-                return span;
-            }
-
             var remaining = _context._options.MaxBufferedResponseBytes - _context._buffer.WrittenCount;
             return span[..Math.Min(span.Length, remaining)];
         }
@@ -662,7 +1081,11 @@ public class Context
     }
 }
 
-internal readonly record struct ParameterCapture(int Start, int Length);
+internal readonly record struct ParameterCapture(
+    int Start,
+    int Length,
+    int SegmentIndex,
+    bool IsWildcard);
 
 internal enum ResponseState
 {

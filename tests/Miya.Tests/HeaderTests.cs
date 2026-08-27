@@ -59,6 +59,57 @@ public sealed class HeaderTests
         Assert.Equal("ok", response.BodyText);
     }
 
+    [Theory(Timeout = 10_000)]
+    [InlineData("/bad path")]
+    [InlineData("/bad%escape")]
+    [InlineData("https://example.com/<bad>")]
+    public async Task RedirectRejectsInvalidUriReferences(string location)
+    {
+        Exception? observed = null;
+        var app = new App();
+        app.Get("/", context =>
+        {
+            observed = Record.Exception(() => context.Redirect(location));
+            return context.Text("ok");
+        });
+
+        await using var response = await TestApp.Send(app);
+
+        Assert.IsType<ArgumentException>(observed);
+        Assert.Equal("ok", response.BodyText);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task RedirectRejectsInvalidUnicode()
+    {
+        Exception? observed = null;
+        var app = new App();
+        app.Get("/", context =>
+        {
+            observed = Record.Exception(() => context.Redirect(new string('\ud800', 1)));
+            return context.Text("ok");
+        });
+
+        await using var response = await TestApp.Send(app);
+
+        Assert.IsType<ArgumentException>(observed);
+        Assert.Equal("ok", response.BodyText);
+    }
+
+    [Theory(Timeout = 10_000)]
+    [InlineData("../next?value=1#part")]
+    [InlineData("https://example.com/users/42?active=true")]
+    public async Task RedirectAcceptsValidUriReferences(string location)
+    {
+        var app = new App();
+        app.Get("/", context => context.Redirect(location));
+
+        await using var response = await TestApp.Send(app);
+
+        Assert.Equal(302, response.Response.StatusCode);
+        Assert.Equal(location, response.Response.Headers.Location.ToString());
+    }
+
     [Fact]
     public async Task AppendHeaderPreservesSeparateValues()
     {

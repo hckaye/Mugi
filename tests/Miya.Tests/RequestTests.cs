@@ -97,4 +97,26 @@ public sealed class RequestTests
 
         Assert.Equal("hello world|none", response.BodyText);
     }
+
+    [Fact(Timeout = 10_000)]
+    public async Task QueryPercentEncodingIsDecodedExactlyOnce()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text(context.Query("value")!));
+
+        await using var response = await TestApp.Send(app, queryString: "?value=%25FF");
+
+        Assert.Equal("%FF", response.BodyText);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task InvalidUtf8QueryReturnsBadRequest()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text(context.Query("value")!));
+
+        await using var response = await TestApp.Send(app, queryString: "?value=%FF");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.Response.StatusCode);
+    }
 }

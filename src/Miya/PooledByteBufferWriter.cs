@@ -4,8 +4,19 @@ namespace Miya;
 
 internal sealed class PooledByteBufferWriter : IBufferWriter<byte>, IDisposable
 {
+    private readonly ArrayPool<byte> _pool;
+    private readonly int _maxPooledBufferByteLength;
     private byte[]? _buffer;
     private int _written;
+
+    public PooledByteBufferWriter(
+        int maxPooledBufferByteLength = int.MaxValue,
+        ArrayPool<byte>? pool = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxPooledBufferByteLength);
+        _maxPooledBufferByteLength = maxPooledBufferByteLength;
+        _pool = pool ?? ArrayPool<byte>.Shared;
+    }
 
     public int WrittenCount => _written;
 
@@ -42,7 +53,7 @@ internal sealed class PooledByteBufferWriter : IBufferWriter<byte>, IDisposable
         _written = 0;
         if (_buffer is not null && _buffer.Length > maxRetainedBytes)
         {
-            ArrayPool<byte>.Shared.Return(_buffer);
+            ReturnIfPooled(_buffer);
             _buffer = null;
         }
     }
@@ -51,7 +62,7 @@ internal sealed class PooledByteBufferWriter : IBufferWriter<byte>, IDisposable
     {
         if (_buffer is not null)
         {
-            ArrayPool<byte>.Shared.Return(_buffer);
+            ReturnIfPooled(_buffer);
             _buffer = null;
         }
 
@@ -77,13 +88,21 @@ internal sealed class PooledByteBufferWriter : IBufferWriter<byte>, IDisposable
         }
 
         var newSize = Math.Max(required, _buffer is null ? 256 : checked(_buffer.Length * 2));
-        var replacement = ArrayPool<byte>.Shared.Rent(newSize);
+        var replacement = _pool.Rent(newSize);
         if (_buffer is not null)
         {
             _buffer.AsSpan(0, _written).CopyTo(replacement);
-            ArrayPool<byte>.Shared.Return(_buffer);
+            ReturnIfPooled(_buffer);
         }
 
         _buffer = replacement;
+    }
+
+    private void ReturnIfPooled(byte[] buffer)
+    {
+        if (buffer.Length <= _maxPooledBufferByteLength)
+        {
+            _pool.Return(buffer);
+        }
     }
 }

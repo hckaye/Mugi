@@ -2,9 +2,11 @@ using System.Globalization;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -196,6 +198,231 @@ public sealed class KestrelIntegrationTests
 
         Assert.Equal(200, response.StatusCode);
         Assert.Equal("11", response.Body);
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ChunkedBodyReaderStopsAtConfiguredLimit()
+    {
+        var app = new App();
+        app.Post("/read", async context =>
+        {
+            var reader = context.Req.BodyReader;
+            while (true)
+            {
+                var result = await reader.ReadAsync(context.Aborted);
+                reader.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted)
+                {
+                    break;
+                }
+            }
+
+            await context.Text("unreachable");
+        });
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            MaxRequestBodyBytes = 4,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        await using var connection = await RawHttpConnection.ConnectAsync(server.Addresses[0]);
+        await connection.WriteAsync(
+            "POST /read HTTP/1.1\r\n" +
+            $"Host: {connection.HostHeader}\r\n" +
+            "Transfer-Encoding: chunked\r\n" +
+            "Connection: close\r\n\r\n" +
+            "3\r\nabc\r\n" +
+            "2\r\nde\r\n" +
+            "0\r\n\r\n");
+
+        var response = await connection.ReadResponseAsync();
+
+        Assert.Equal(StatusCodes.Status413PayloadTooLarge, response.StatusCode);
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task HeadCountsLargeBodyWithoutRetainingResponseBuffer()
+    {
+        const int bodyLength = 2 * 1024 * 1024;
+        var body = new string('x', bodyLength);
+        Context? captured = null;
+        var app = new App();
+        app.Get("/large", context =>
+        {
+            captured = context;
+            return context.Text(body);
+        });
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            MaxBufferedResponseBytes = 32,
+            MaxRetainedBufferBytes = bodyLength * 2,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var request = new HttpRequestMessage(HttpMethod.Head, "/large");
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal((long)bodyLength, response.Content.Headers.ContentLength);
+        Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        Assert.NotNull(captured);
+        Assert.Equal(0, GetRetainedResponseBufferLength(captured));
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ReusedContextRejectsOperationsFromPreviousRequestGeneration()
+    {
+        var mutate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var leakedHeaderResult = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var leakedRequestResult = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Context? firstContext = null;
+        var app = new App();
+        app.Get("/first", context =>
+        {
+            firstContext = context;
+            _ = Task.Run(async () =>
+            {
+                await mutate.Task;
+                leakedHeaderResult.TrySetResult(Record.Exception(
+                    () => context.Header("X-Leaked", "true")));
+                leakedRequestResult.TrySetResult(Record.Exception(
+                    () => _ = context.Req.Method));
+            });
+            return context.Text("first");
+        });
+        app.Get("/second", async context =>
+        {
+            secondEntered.TrySetResult(ReferenceEquals(firstContext, context));
+            await releaseSecond.Task;
+            await context.Text("second");
+        });
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var firstResponse = await client.GetAsync("/first");
+        Assert.Equal("first", await firstResponse.Content.ReadAsStringAsync());
+
+        var secondResponseTask = client.GetAsync("/second");
+        try
+        {
+            Assert.True(await secondEntered.Task.WaitAsync(OperationTimeout));
+            mutate.TrySetResult();
+            var headerException = await leakedHeaderResult.Task.WaitAsync(OperationTimeout);
+            var requestException = await leakedRequestResult.Task.WaitAsync(OperationTimeout);
+            releaseSecond.TrySetResult();
+
+            using var secondResponse = await secondResponseTask.WaitAsync(OperationTimeout);
+            Assert.IsType<ObjectDisposedException>(headerException);
+            Assert.IsType<ObjectDisposedException>(requestException);
+            Assert.False(secondResponse.Headers.Contains("X-Leaked"));
+            Assert.Equal("second", await secondResponse.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            mutate.TrySetResult();
+            releaseSecond.TrySetResult();
+        }
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task RouteParametersRejectInvalidUtf8WithoutDoubleDecoding()
+    {
+        var app = new App();
+        app.Get("/users/:id", context => context.Text(context.Param("id")));
+        app.Get("/query", context => context.Text(context.Query("value")!));
+
+        await using var server = await StartAsync(app);
+        await using (var connection = await RawHttpConnection.ConnectAsync(server.Addresses[0]))
+        {
+            await connection.WriteAsync(
+                "GET /users/%FF HTTP/1.1\r\n" +
+                $"Host: {connection.HostHeader}\r\n" +
+                "Connection: close\r\n\r\n");
+            var invalid = await connection.ReadResponseAsync();
+            Assert.Equal(StatusCodes.Status400BadRequest, invalid.StatusCode);
+        }
+
+        await using (var connection = await RawHttpConnection.ConnectAsync(server.Addresses[0]))
+        {
+            await connection.WriteAsync(
+                "GET /query?value=%FF HTTP/1.1\r\n" +
+                $"Host: {connection.HostHeader}\r\n" +
+                "Connection: close\r\n\r\n");
+            var invalid = await connection.ReadResponseAsync();
+            Assert.Equal(StatusCodes.Status400BadRequest, invalid.StatusCode);
+        }
+
+        using var client = CreateClient(server);
+        using var escapedPercent = await client.GetAsync("/users/%25FF");
+        using var utf8 = await client.GetAsync("/users/%E6%97%A5%E6%9C%AC");
+        using var query = await client.GetAsync("/query?value=%25FF");
+
+        Assert.Equal(HttpStatusCode.OK, escapedPercent.StatusCode);
+        Assert.Equal("%FF", await escapedPercent.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, utf8.StatusCode);
+        Assert.Equal("日本", await utf8.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, query.StatusCode);
+        Assert.Equal("%FF", await query.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task HttpMethodTokensAreCaseSensitive()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await StartAsync(app);
+        await using (var connection = await RawHttpConnection.ConnectAsync(server.Addresses[0]))
+        {
+            await connection.WriteAsync(
+                "get / HTTP/1.1\r\n" +
+                $"Host: {connection.HostHeader}\r\n" +
+                "Connection: close\r\n\r\n");
+            var lowerCase = await connection.ReadResponseAsync();
+            Assert.Equal(StatusCodes.Status405MethodNotAllowed, lowerCase.StatusCode);
+        }
+
+        using var client = CreateClient(server);
+        using var upperCase = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, upperCase.StatusCode);
+        Assert.Equal("Hello", await upperCase.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task RedirectValidatesUriReferencesOnKestrel()
+    {
+        Exception? invalidException = null;
+        var app = new App();
+        app.Get("/invalid", context =>
+        {
+            invalidException = Record.Exception(() => context.Redirect("/bad path"));
+            return context.Text("caught");
+        });
+        app.Get("/relative", context => context.Redirect("../next?value=1#part"));
+        app.Get("/absolute", context => context.Redirect("https://example.com/users/42"));
+
+        await using var server = await StartAsync(app);
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri(server.Addresses[0]),
+            Timeout = OperationTimeout,
+        };
+        using var invalid = await client.GetAsync("/invalid");
+        using var relative = await client.GetAsync("/relative");
+        using var absolute = await client.GetAsync("/absolute");
+
+        Assert.IsType<ArgumentException>(invalidException);
+        Assert.Equal("caught", await invalid.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Found, relative.StatusCode);
+        Assert.Equal("../next?value=1#part", relative.Headers.Location?.OriginalString);
+        Assert.Equal(HttpStatusCode.Found, absolute.StatusCode);
+        Assert.Equal("https://example.com/users/42", absolute.Headers.Location?.OriginalString);
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
@@ -485,6 +712,17 @@ public sealed class KestrelIntegrationTests
             await context.Text(body.Length.ToString(CultureInfo.InvariantCulture));
         });
         return app;
+    }
+
+    private static int GetRetainedResponseBufferLength(Context context)
+    {
+        var writerField = typeof(Context).GetField("_buffer", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Context response buffer field was not found.");
+        var writer = writerField.GetValue(context)
+            ?? throw new InvalidOperationException("Context response buffer was null.");
+        var bufferField = writer.GetType().GetField("_buffer", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Pooled response array field was not found.");
+        return bufferField.GetValue(writer) is byte[] buffer ? buffer.Length : 0;
     }
 
     private static Task<MiyaServer> StartAsync(App app) => app.StartAsync(

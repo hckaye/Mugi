@@ -42,7 +42,8 @@ internal sealed class TestExchange : IAsyncDisposable
         string path = "/",
         string queryString = "",
         byte[]? body = null,
-        IReadOnlyDictionary<string, string>? headers = null)
+        IReadOnlyDictionary<string, string>? headers = null,
+        string? rawTarget = null)
     {
         body ??= [];
         var requestHeaders = new HeaderDictionary();
@@ -60,6 +61,7 @@ internal sealed class TestExchange : IAsyncDisposable
             Method = method,
             Path = path,
             QueryString = queryString,
+            RawTarget = rawTarget ?? string.Concat(path, queryString),
             Headers = requestHeaders,
             Body = requestStream,
         };
@@ -216,10 +218,11 @@ internal static class TestApp
         string queryString = "",
         byte[]? body = null,
         IReadOnlyDictionary<string, string>? headers = null,
-        MiyaOptions? options = null)
+        MiyaOptions? options = null,
+        string? rawTarget = null)
         where TContext : Context, new()
     {
-        var exchange = TestExchange.Create(method, path, queryString, body, headers);
+        var exchange = TestExchange.Create(method, path, queryString, body, headers, rawTarget);
         try
         {
             await app.ExecuteAsync(exchange.Features, options);

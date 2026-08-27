@@ -24,7 +24,7 @@ public partial class App<TContext>
     {
         ArgumentException.ThrowIfNullOrEmpty(method);
         ValidateMethod(method);
-        return AddRoute(method.ToUpperInvariant(), pattern, handler);
+        return AddRoute(method, pattern, handler);
     }
 
     private App<TContext> AddRoute(string method, RouteTemplate pattern, Handler<TContext> handler)

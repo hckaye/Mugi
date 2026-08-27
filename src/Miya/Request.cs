@@ -29,20 +29,24 @@ public sealed class Request
     {
         get
         {
+            _context.EnsureActive();
             ClaimBody();
-            ValidateContentLength(_context.Options.MaxRequestBodyBytes);
-            return GetBodyReader();
+            var limit = _context.Options.MaxRequestBodyBytes;
+            ValidateContentLength(limit);
+            return new LimitedPipeReader(GetBodyReader(), limit);
         }
     }
 
     public string? Header(string name)
     {
+        _context.EnsureActive();
         ArgumentException.ThrowIfNullOrEmpty(name);
         return Feature.Headers.TryGetValue(name, out var value) ? value.ToString() : null;
     }
 
     public string? Query(string name)
     {
+        _context.EnsureActive();
         ArgumentNullException.ThrowIfNull(name);
         _query ??= ParseQuery(Feature.QueryString);
         return _query.TryGetValue(name, out var value) ? value : null;
@@ -50,6 +54,7 @@ public sealed class Request
 
     public async ValueTask<string> Text()
     {
+        _context.EnsureActive();
         using var body = await ReadBody(_context.Options.MaxRequestBodyBytes).ConfigureAwait(false);
         try
         {
@@ -63,6 +68,7 @@ public sealed class Request
 
     public async ValueTask<T?> Json<T>()
     {
+        _context.EnsureActive();
         var limit = Math.Min(_context.Options.MaxRequestBodyBytes, _context.Options.MaxJsonBodyBytes);
         using var body = await ReadBody(limit).ConfigureAwait(false);
         return MiyaJson.Deserialize<T>(body.WrittenMemory.Span, _context.Options.Json);
@@ -72,6 +78,45 @@ public sealed class Request
     {
         _query = null;
         Volatile.Write(ref _bodyClaimed, 0);
+    }
+
+    internal string GetRouteParameter(ParameterCapture capture)
+    {
+        _context.EnsureActive();
+        var feature = Feature;
+        var rawTarget = feature.RawTarget;
+        if (!string.IsNullOrEmpty(rawTarget) && rawTarget[0] == '/')
+        {
+            var queryStart = rawTarget.IndexOf('?');
+            var rawPath = queryStart < 0 ? rawTarget.AsSpan() : rawTarget.AsSpan(0, queryStart);
+            var segmentStart = 1;
+            for (var segmentIndex = 0; segmentIndex < capture.SegmentIndex; segmentIndex++)
+            {
+                var slash = rawPath[segmentStart..].IndexOf('/');
+                if (slash < 0)
+                {
+                    return DecodeCapturedPath(feature.Path, capture);
+                }
+
+                segmentStart += slash + 1;
+            }
+
+            if (segmentStart > rawPath.Length)
+            {
+                return DecodeCapturedPath(feature.Path, capture);
+            }
+
+            var nextSlash = rawPath[segmentStart..].IndexOf('/');
+            var segmentLength = capture.IsWildcard || nextSlash < 0
+                ? rawPath.Length - segmentStart
+                : nextSlash;
+            return Context.DecodePercentEncoded(
+                rawPath.Slice(segmentStart, segmentLength),
+                plusAsSpace: false,
+                "The route parameter is not valid UTF-8.");
+        }
+
+        return DecodeCapturedPath(feature.Path, capture);
     }
 
     private IHttpRequestFeature Feature =>
@@ -97,7 +142,7 @@ public sealed class Request
         ClaimBody();
         ValidateContentLength(limit);
 
-        var destination = new PooledByteBufferWriter();
+        var destination = new PooledByteBufferWriter(_context.Options.Json.MaxPooledBufferByteLength);
         var reader = GetBodyReader();
         try
         {
@@ -159,7 +204,7 @@ public sealed class Request
         }
     }
 
-    private static BadHttpRequestException BodyTooLarge(int limit) => new(
+    internal static BadHttpRequestException BodyTooLarge(long limit) => new(
         $"The request body exceeds the configured limit of {limit} bytes.",
         StatusCodes.Status413PayloadTooLarge);
 
@@ -197,20 +242,110 @@ public sealed class Request
 
     private static string DecodeQueryPart(ReadOnlySpan<char> value)
     {
-        if (value.IndexOfAny('%', '+') < 0)
+        return Context.DecodePercentEncoded(
+            value,
+            plusAsSpace: true,
+            "The query string is not valid UTF-8.");
+    }
+
+    private static string DecodeCapturedPath(string path, ParameterCapture capture) =>
+        Context.DecodePercentEncoded(
+            path.AsSpan(capture.Start, capture.Length),
+            plusAsSpace: false,
+            "The route parameter is not valid UTF-8.");
+}
+
+internal sealed class LimitedPipeReader : PipeReader
+{
+    private readonly PipeReader _inner;
+    private readonly long _limit;
+    private ReadOnlySequence<byte> _activeBuffer;
+    private long _consumedBytes;
+    private bool _hasActiveRead;
+
+    public LimitedPipeReader(PipeReader inner, long limit)
+    {
+        _inner = inner;
+        _limit = limit;
+    }
+
+    public override void AdvanceTo(SequencePosition consumed)
+    {
+        TrackConsumed(consumed);
+        _inner.AdvanceTo(consumed);
+    }
+
+    public override void AdvanceTo(SequencePosition consumed, SequencePosition examined)
+    {
+        TrackConsumed(consumed);
+        _inner.AdvanceTo(consumed, examined);
+    }
+
+    public override void CancelPendingRead() => _inner.CancelPendingRead();
+
+    public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+
+    public override ValueTask CompleteAsync(Exception? exception = null) => _inner.CompleteAsync(exception);
+
+    public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureNoActiveRead();
+        var operation = _inner.ReadAsync(cancellationToken);
+        if (operation.IsCompletedSuccessfully)
         {
-            return value.ToString();
+            return new ValueTask<ReadResult>(Validate(operation.Result));
         }
 
-        Context.ValidatePercentEscapes(value);
-        var encoded = value.ToString().Replace('+', ' ');
-        try
+        return AwaitRead(operation);
+    }
+
+    public override bool TryRead(out ReadResult result)
+    {
+        EnsureNoActiveRead();
+        if (!_inner.TryRead(out var innerResult))
         {
-            return Uri.UnescapeDataString(encoded);
+            result = default;
+            return false;
         }
-        catch (UriFormatException exception)
+
+        result = Validate(innerResult);
+        return true;
+    }
+
+    private async ValueTask<ReadResult> AwaitRead(ValueTask<ReadResult> operation) =>
+        Validate(await operation.ConfigureAwait(false));
+
+    private ReadResult Validate(ReadResult result)
+    {
+        var buffer = result.Buffer;
+        if (buffer.Length > _limit - _consumedBytes)
         {
-            throw new BadHttpRequestException("The query string contains an invalid escape sequence.", StatusCodes.Status400BadRequest, exception);
+            _inner.AdvanceTo(buffer.End);
+            throw Request.BodyTooLarge(_limit);
         }
+
+        _activeBuffer = buffer;
+        _hasActiveRead = true;
+        return result;
+    }
+
+    private void EnsureNoActiveRead()
+    {
+        if (_hasActiveRead)
+        {
+            throw new InvalidOperationException("AdvanceTo must be called before reading again.");
+        }
+    }
+
+    private void TrackConsumed(SequencePosition consumed)
+    {
+        if (!_hasActiveRead)
+        {
+            throw new InvalidOperationException("No read operation is active.");
+        }
+
+        _consumedBytes = checked(_consumedBytes + _activeBuffer.Slice(0, consumed).Length);
+        _activeBuffer = default;
+        _hasActiveRead = false;
     }
 }

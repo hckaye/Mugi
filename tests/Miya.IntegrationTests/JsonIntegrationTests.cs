@@ -58,6 +58,50 @@ public sealed class JsonIntegrationTests
         Assert.Equal("Bad Request", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task BufferedJsonPromotesToStreamingWithoutResettingConnection()
+    {
+        var promoted = false;
+        var app = new App();
+        app.Get("/large", context =>
+        {
+            var operation = context.Json(
+                new PromotionPayload("123456789"),
+                PromotionPayloadCodec.Instance);
+            promoted = context.ResponseStarted;
+            return operation;
+        });
+
+        await using var server = await app.StartAsync(new MiyaOptions
+        {
+            Port = 0,
+            MaxBufferedResponseBytes = 10,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/large");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(promoted);
+        Assert.Equal("{\"value\":\"123456789\"}", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task MissingOutputCodecIsMappedToInternalServerError()
+    {
+        var app = new App();
+        app.Get("/missing-codec", context => WriteGenericJson(
+            context,
+            new UnregisteredOutputPayload(42)));
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/missing-codec");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal("Internal Server Error", await response.Content.ReadAsStringAsync());
+    }
+
     private static App CreateApp()
     {
         MiyaJson.Register(JsonUserCodec.Instance);
@@ -72,6 +116,8 @@ public sealed class JsonIntegrationTests
         });
         return app;
     }
+
+    private static ValueTask WriteGenericJson<T>(Context context, T value) => context.Json(value);
 
     private static Task<MiyaServer> StartAsync(App app) => app.StartAsync(
         new MiyaOptions
@@ -88,6 +134,31 @@ public sealed class JsonIntegrationTests
 }
 
 internal sealed record JsonUser(int Id, string Name);
+
+internal sealed record PromotionPayload(string Value);
+
+internal sealed record UnregisteredOutputPayload(int Value);
+
+internal sealed class PromotionPayloadCodec : IMiyaJsonCodec<PromotionPayload>
+{
+    public static PromotionPayloadCodec Instance { get; } = new();
+
+    public void Write(ref MiyaJsonWriter writer, PromotionPayload? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull();
+            return;
+        }
+
+        writer.WriteRaw("{\"value\":"u8);
+        writer.Flush();
+        writer.WriteString(value.Value);
+        writer.WriteRaw("}"u8);
+    }
+
+    public PromotionPayload? Read(ref MiyaJsonReader reader) => throw new NotSupportedException();
+}
 
 internal sealed class JsonUserCodec : IMiyaJsonCodec<JsonUser>
 {
