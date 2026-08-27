@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Miya;
 using Miya.Json;
+using Miya.Schema;
 
 var app = new App();
 
@@ -23,6 +24,26 @@ app.Post("/users", static async context =>
     await context.Json(user);
 });
 
+var searchSchema = Schemas.For<SearchInput>()
+    .Query(input => input.Limit, rules => rules.Default(20).Range(1, 100));
+app.Get(
+    "/search/:Page",
+    searchSchema,
+    static (context, input) => context.Json(input));
+
+var createPersonSchema = Schemas.For<CreatePersonInput>()
+    .Body(input => input.Name, rules => rules.NotEmpty().MaxLength(80).Pattern("^[A-Za-z ]+$"))
+    .Body(input => input.Age, rules => rules.Range(0, 120))
+    .Body(input => input.Note, rules => rules.Optional().MaxLength(200));
+app.Post(
+    "/people",
+    createPersonSchema,
+    static (context, input) => context.Json(input));
+
 app.Run();
 
 internal sealed record User(string Id);
+
+internal sealed record SearchInput(int Page, string Query, int Limit);
+
+internal sealed record CreatePersonInput(string Name, int Age, string? Note);

@@ -10,7 +10,7 @@ internal sealed class JsonInvocationCandidate
     internal JsonInvocationCandidate(InvocationAnalysis analysis)
     {
         Analysis = analysis;
-        ShapeKey = CreateShapeKey(analysis.JsonType!);
+        ShapeKey = CreateShapeKey(analysis.JsonType ?? analysis.SchemaDefinition!.InputType);
     }
 
     internal InvocationAnalysis Analysis { get; }

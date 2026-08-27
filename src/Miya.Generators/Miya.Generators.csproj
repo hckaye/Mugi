@@ -6,7 +6,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <PackageId>Miya.Generators</PackageId>
-    <Description>Compile-time JSON codecs and route templates for Miya.</Description>
+    <Description>Compile-time JSON codecs, route templates, and typed input binders for Miya.</Description>
   </PropertyGroup>
 
   <ItemGroup>

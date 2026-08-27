@@ -63,6 +63,7 @@ public static class GeneratorCore
 
         AddDuplicateRouteDiagnostics(analyses, diagnostics);
 
+        var schemaBindings = SchemaBindingBuilder.Build(analyses, diagnostics);
         var orderedModels = BuildJsonModels(analyses, settings, diagnostics);
         var models = new Dictionary<ITypeSymbol, JsonTypeModel>(SymbolEqualityComparer.Default);
         foreach (var model in orderedModels)
@@ -87,6 +88,13 @@ public static class GeneratorCore
             sources.Add(new GeneratedSource(
                 "Miya.RouteTemplates.g.cs",
                 RouteAndInterceptorEmitter.EmitRouteTemplates(routes)));
+        }
+
+        foreach (var binding in schemaBindings)
+        {
+            sources.Add(new GeneratedSource(
+                "Miya.SchemaBinder." + SchemaSourceEmitter.BinderName(binding.InputType) + ".g.cs",
+                new SchemaSourceEmitter(binding, settings).Emit()));
         }
 
         if (settings.EmitInterceptors && HasInterceptor(analyses, models))
@@ -141,6 +149,23 @@ public static class GeneratorCore
         return sources.ToImmutable();
     }
 
+    internal static GenerationResult GenerateIncrementalSchemaSources(
+        ImmutableArray<InvocationAnalysis> analyses,
+        GeneratorSettings settings)
+    {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var bindings = SchemaBindingBuilder.Build(analyses, diagnostics);
+        var sources = ImmutableArray.CreateBuilder<GeneratedSource>(bindings.Length);
+        foreach (var binding in bindings)
+        {
+            sources.Add(new GeneratedSource(
+                "Miya.SchemaBinder." + SchemaSourceEmitter.BinderName(binding.InputType) + ".g.cs",
+                new SchemaSourceEmitter(binding, settings).Emit()));
+        }
+
+        return new GenerationResult(sources.ToImmutable(), diagnostics.ToImmutable());
+    }
+
     internal static GeneratedSource? GenerateIncrementalInterceptorSource(
         InvocationAnalysis analysis,
         GeneratorSettings settings)
@@ -177,10 +202,21 @@ public static class GeneratorCore
         InvocationAnalysis analysis,
         GeneratorSettings settings)
     {
-        var result = GenerateFromAnalyses(
-            ImmutableArray.Create(analysis),
-            new GeneratorSettings(settings.Naming, emitInterceptors: false));
-        return result.Diagnostics;
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        if (analysis.Diagnostic is not null)
+        {
+            diagnostics.Add(analysis.Diagnostic);
+        }
+
+        if (analysis.JsonType is not null || analysis.SchemaDefinition is not null)
+        {
+            _ = BuildJsonModels(
+                ImmutableArray.Create(analysis),
+                new GeneratorSettings(settings.Naming, emitInterceptors: false),
+                diagnostics);
+        }
+
+        return diagnostics.ToImmutable();
     }
 
     internal static ImmutableArray<Diagnostic> GenerateDuplicateRouteDiagnostics(
@@ -199,17 +235,20 @@ public static class GeneratorCore
         var models = new Dictionary<ITypeSymbol, JsonTypeModel>(SymbolEqualityComparer.Default);
         foreach (var analysis in analyses)
         {
-            if (analysis.JsonType is null)
+            var jsonType = analysis.JsonType ?? analysis.SchemaDefinition?.InputType;
+            if (jsonType is null)
             {
                 continue;
             }
 
-            if (!JsonTypeGraphBuilder.TryBuild(analysis.JsonType, out var graph, out var error))
+            if (!JsonTypeGraphBuilder.TryBuild(jsonType, out var graph, out var error))
             {
                 diagnostics.Add(Diagnostic.Create(
-                    DiagnosticCatalog.UnsupportedJsonType,
+                    analysis.SchemaDefinition is null
+                        ? DiagnosticCatalog.UnsupportedJsonType
+                        : DiagnosticCatalog.InvalidSchemaDefinition,
                     analysis.Syntax.GetLocation(),
-                    analysis.JsonType.ToDisplayString(),
+                    jsonType.ToDisplayString(),
                     error));
                 continue;
             }
@@ -219,7 +258,7 @@ public static class GeneratorCore
                 diagnostics.Add(Diagnostic.Create(
                     DiagnosticCatalog.UnsupportedJsonType,
                     analysis.Syntax.GetLocation(),
-                    analysis.JsonType.ToDisplayString(),
+                    jsonType.ToDisplayString(),
                     error));
                 continue;
             }

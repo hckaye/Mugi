@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Miya.Schema</PackageId>
+    <Description>Typed request binding and validation for Miya.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Miya/Miya.csproj" />
+    <ProjectReference Include="../Miya.Json/Miya.Json.csproj" />
+  </ItemGroup>
+
+</Project>

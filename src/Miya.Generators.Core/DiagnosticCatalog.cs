@@ -37,4 +37,60 @@ internal static class DiagnosticCatalog
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor UnknownRouteParameterAccess = new(
+        "MIYA006",
+        "The route parameter is not declared",
+        "Route pattern '{0}' does not declare a parameter named '{1}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor SchemaRouteFieldMissing = new(
+        "MIYA010",
+        "The schema route field is not declared by the route",
+        "Schema field '{0}' is mapped from the route, but route pattern '{1}' has no ':{0}' parameter",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor SchemaRouteParameterMissing = new(
+        "MIYA011",
+        "The route parameter is not mapped by the input schema",
+        "Route parameter '{0}' in pattern '{1}' has no route-mapped field on '{2}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor UnsupportedSchemaFieldType = new(
+        "MIYA012",
+        "The schema field type is not supported",
+        "Schema field '{0}' cannot be read from {1}: {2}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InvalidSchemaDefinition = new(
+        "MIYA013",
+        "The schema definition is invalid",
+        "The schema for '{0}' is invalid: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InvalidSchemaRule = new(
+        "MIYA014",
+        "The schema validation rule is invalid",
+        "Rule '{0}' cannot be used for field '{1}': {2}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor AmbiguousSchemaBinding = new(
+        "MIYA015",
+        "The input type has more than one binding shape",
+        "Input type '{0}' is used with more than one route or schema binding shape; use a separate input record for each endpoint",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

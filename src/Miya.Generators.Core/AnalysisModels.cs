@@ -13,7 +13,9 @@ internal sealed class InvocationAnalysis
         IMethodSymbol? jsonTargetMethod,
         string? jsonInterceptAttribute,
         RouteCall? route,
-        Diagnostic? diagnostic)
+        Diagnostic? diagnostic,
+        SchemaDefinition? schemaDefinition = null,
+        SchemaEndpointCall? schemaEndpoint = null)
     {
         Syntax = syntax;
         JsonType = jsonType;
@@ -22,6 +24,8 @@ internal sealed class InvocationAnalysis
         JsonInterceptAttribute = jsonInterceptAttribute;
         Route = route;
         Diagnostic = diagnostic;
+        SchemaDefinition = schemaDefinition;
+        SchemaEndpoint = schemaEndpoint;
     }
 
     internal InvocationExpressionSyntax Syntax { get; }
@@ -37,6 +41,140 @@ internal sealed class InvocationAnalysis
     internal RouteCall? Route { get; }
 
     internal Diagnostic? Diagnostic { get; }
+
+    internal SchemaDefinition? SchemaDefinition { get; }
+
+    internal SchemaEndpointCall? SchemaEndpoint { get; }
+}
+
+internal enum SchemaFieldSource
+{
+    Automatic,
+    Route,
+    Query,
+    Body,
+    Header,
+}
+
+internal enum SchemaRuleKind
+{
+    Optional,
+    Default,
+    Must,
+    Min,
+    Max,
+    Range,
+    Positive,
+    NonNegative,
+    NotEmpty,
+    Length,
+    MinLength,
+    MaxLength,
+    Pattern,
+}
+
+internal sealed class SchemaDefinition
+{
+    internal SchemaDefinition(
+        ITypeSymbol inputType,
+        ImmutableArray<SchemaFieldDeclaration> fields,
+        Diagnostic? diagnostic,
+        Location location)
+    {
+        InputType = inputType;
+        Fields = fields;
+        Diagnostic = diagnostic;
+        Location = location;
+    }
+
+    internal ITypeSymbol InputType { get; }
+
+    internal ImmutableArray<SchemaFieldDeclaration> Fields { get; }
+
+    internal Diagnostic? Diagnostic { get; }
+
+    internal Location Location { get; }
+}
+
+internal sealed class SchemaFieldDeclaration
+{
+    internal SchemaFieldDeclaration(
+        IPropertySymbol property,
+        SchemaFieldSource source,
+        string? headerName,
+        ImmutableArray<SchemaRuleDeclaration> rules,
+        Location location)
+    {
+        Property = property;
+        Source = source;
+        HeaderName = headerName;
+        Rules = rules;
+        Location = location;
+    }
+
+    internal IPropertySymbol Property { get; }
+
+    internal SchemaFieldSource Source { get; }
+
+    internal string? HeaderName { get; }
+
+    internal ImmutableArray<SchemaRuleDeclaration> Rules { get; }
+
+    internal Location Location { get; }
+}
+
+internal sealed class SchemaRuleDeclaration
+{
+    internal SchemaRuleDeclaration(
+        SchemaRuleKind kind,
+        ImmutableArray<object?> values,
+        string? predicate,
+        string? message,
+        Location location)
+    {
+        Kind = kind;
+        Values = values;
+        Predicate = predicate;
+        Message = message;
+        Location = location;
+    }
+
+    internal SchemaRuleKind Kind { get; }
+
+    internal ImmutableArray<object?> Values { get; }
+
+    internal string? Predicate { get; }
+
+    internal string? Message { get; }
+
+    internal Location Location { get; }
+}
+
+internal sealed class SchemaEndpointCall
+{
+    internal SchemaEndpointCall(
+        string pattern,
+        string method,
+        ITypeSymbol inputType,
+        RoutePatternSpec template,
+        Location location)
+    {
+        Pattern = pattern;
+        Method = method;
+        InputType = inputType;
+        Template = template;
+        Location = location;
+    }
+
+    internal string Pattern { get; }
+
+    internal string Method { get; }
+
+    internal ITypeSymbol InputType { get; }
+
+    internal RoutePatternSpec Template { get; }
+
+    internal Location Location { get; }
 }
 
 internal sealed class RouteCall
