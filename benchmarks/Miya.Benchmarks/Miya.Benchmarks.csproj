@@ -22,6 +22,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
 </Project>
