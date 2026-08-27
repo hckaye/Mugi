@@ -2,11 +2,9 @@
 
 English | [日本語](README.ja.md)
 
-Miya is a fast, simple HTTP framework for .NET 10. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, read the request and write the response through one context object, and run on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
+Miya is a fast, simple HTTP framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, read the request and write the response through one context object, and run on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
 Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing and JSON are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
-
-Miya targets `net10.0`. The measurements in this document used .NET SDK 10.0.203.
 
 ## Install
 
@@ -134,7 +132,7 @@ app.Use(static async (c, next) =>
 
 ## Returning and reading JSON
 
-Miya reads and writes JSON with its own serializer, Json. In the common case you configure nothing: return an object and Miya writes it as JSON.
+Miya reads and writes JSON with its own serializer. In the common case you configure nothing: return an object and Miya writes it as JSON.
 
 ```csharp
 app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
@@ -229,7 +227,7 @@ internal sealed class UserCodec : IJsonCodec<User>
 
 ### Limits for untrusted input
 
-Json enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `AppOptions` and `JsonOptions`.
+The serializer enforces limits so that malformed or hostile JSON cannot exhaust memory or the stack. The defaults are safe for input from the network and are set on `AppOptions` and `JsonOptions`.
 
 | Setting | Default |
 | --- | ---: |
@@ -239,7 +237,7 @@ Json enforces limits so that malformed or hostile JSON cannot exhaust memory or 
 | One string token, `MaxStringByteLength` | 1 MiB |
 | Members in one object or elements in one array, `MaxCollectionSize` | 1,048,576 |
 | Digits in one number, `MaxNumberDigits` | 128 |
-| Retained Json temporary buffer, `MaxPooledBufferByteLength` | 64 KiB |
+| Retained JSON temporary buffer, `MaxPooledBufferByteLength` | 64 KiB |
 | Buffered response, `AppOptions.MaxBufferedResponseBytes` | 1 MiB |
 | Request body, `AppOptions.MaxRequestBodyBytes` | 30 MiB |
 
@@ -360,7 +358,7 @@ Measurements were taken on 2026-08-27 with an Apple M5 CPU, 10 physical cores, m
 
 The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389, 7.446, and 8.114 ms. Each run started a new NativeAOT process on a new loopback port and stopped it after receiving the complete HTTP response.
 
-### Json and System.Text.Json
+### Miya and System.Text.Json
 
 The serializer measurements were repeated on 2026-08-28 using the Apple M5, macOS arm64, and .NET 10 environment listed above. The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `Json.Serialize` and `Json.Deserialize` overloads. No benchmark-specific codecs were used.
 

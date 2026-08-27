@@ -2,11 +2,9 @@
 
 [English](README.md) | 日本語
 
-Miya は高速でシンプルな .NET 10 向け HTTP フレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行い、`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
+Miya は高速でシンプルな .NET 向け HTTP フレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行い、`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
 
 Miya は NativeAOT のために作られています。実行時にリフレクション、アセンブリスキャン、実行時コード生成を一切使わないので、publish したアプリは数ミリ秒で起動し、小さな単一バイナリになります。ルーティングと JSON はソースジェネレーターがコンパイル時に用意します。ジェネレーターを自分で呼ぶことはなく、パッケージを参照するだけで動きます。
-
-Miya は `net10.0` を対象にします。以下の計測には .NET SDK 10.0.203 を使いました。
 
 ## インストール
 
@@ -134,7 +132,7 @@ app.Use(static async (c, next) =>
 
 ## JSON の返し方と読み方
 
-Miya は自前のシリアライザー Json で JSON を読み書きします。普通に使う分には設定は不要です。オブジェクトを返せば Miya が JSON として書きます。
+Miya は自前のシリアライザーで JSON を読み書きします。普通に使う分には設定は不要です。オブジェクトを返せば Miya が JSON として書きます。
 
 ```csharp
 app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
@@ -229,7 +227,7 @@ internal sealed class UserCodec : IJsonCodec<User>
 
 ### 信頼できない入力に対する上限
 
-Json は、壊れた入力や悪意ある JSON がメモリやスタックを使い尽くせないよう上限を設けます。既定値はネットワークからの入力に対して安全で、`AppOptions` と `JsonOptions` で設定します。
+シリアライザーは、壊れた入力や悪意ある JSON がメモリやスタックを使い尽くせないよう上限を設けます。既定値はネットワークからの入力に対して安全で、`AppOptions` と `JsonOptions` で設定します。
 
 | 設定 | 既定値 |
 | --- | ---: |
@@ -239,7 +237,7 @@ Json は、壊れた入力や悪意ある JSON がメモリやスタックを使
 | 1 つの文字列トークン、`MaxStringByteLength` | 1 MiB |
 | 1 つのオブジェクトのメンバー数または 1 つの配列の要素数、`MaxCollectionSize` | 1,048,576 |
 | 1 つの数値の桁数、`MaxNumberDigits` | 128 |
-| プールに保持する Json 一時バッファ、`MaxPooledBufferByteLength` | 64 KiB |
+| プールに保持する JSON 一時バッファ、`MaxPooledBufferByteLength` | 64 KiB |
 | バッファリングするレスポンス、`AppOptions.MaxBufferedResponseBytes` | 1 MiB |
 | リクエスト本文、`AppOptions.MaxRequestBodyBytes` | 30 MiB |
 
@@ -360,7 +358,7 @@ HTTP/3 を要求しても `QuicListener.IsSupported` が false の場合、起�
 
 起動のサンプルは 21.598、9.278、8.435、8.452、8.848、8.710、7.641、8.389、7.446、8.114 ms でした。各回は新しい loopback ポートで新しい NativeAOT プロセスを起動し、HTTP レスポンスを受け取り終えてから停止しました。
 
-### Json と System.Text.Json
+### Miya と System.Text.Json
 
 シリアライザーの計測は 2026-08-28 に、上記の Apple M5、macOS arm64、.NET 10 環境で取り直しました。シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
 
