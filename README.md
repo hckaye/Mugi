@@ -427,6 +427,8 @@ Miya is built to be fast and allocation-light. In the measured scenarios:
 - Routing and the middleware pipeline allocate nothing on the synchronous hot path (a 404 miss and a 405 mismatch allocate only their small response state).
 - The `samples/Hello` NativeAOT binary is about 6.8 MiB and answers its first request within a few milliseconds of process start.
 
+Miya runs on Kestrel, the same HTTP server ASP.NET Core uses, so the raw request throughput is the same as an ASP.NET Core app doing the same work. The server is the shared bottleneck; Miya's difference is the thin layer above it, which shows up as lower per-request memory rather than higher throughput.
+
 Numbers, scenarios, the measurement environment, and how to reproduce them are in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## v0 limitations
