@@ -13,6 +13,9 @@ public sealed class CliSmokeTests
         Directory.CreateDirectory(output);
         try
         {
+            var restore = await Run(root, "restore", fixture);
+            Assert.Equal(0, restore.ExitCode);
+
             var staleFile = Path.Combine(output, "Miya.Stale.g.cs");
             await File.WriteAllTextAsync(staleFile, "// stale");
             var generate = await Run(
@@ -36,7 +39,53 @@ public sealed class CliSmokeTests
         }
     }
 
+    [Fact]
+    public async Task Fails_loudly_when_the_project_does_not_compile()
+    {
+        var root = FindRepositoryRoot();
+        var projectDirectory = Path.Combine(Path.GetTempPath(), "miya-gen-broken-" + Guid.NewGuid().ToString("N"));
+        var output = Path.Combine(projectDirectory, "generated");
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(output);
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(projectDirectory, "Broken.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                  </PropertyGroup>
+                </Project>
+                """);
+            await File.WriteAllTextAsync(
+                Path.Combine(projectDirectory, "Program.cs"),
+                "MissingType.Method();");
+
+            var generate = await RunAllowingFailure(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "--project", Path.Combine(projectDirectory, "Broken.csproj"), "--output", output);
+
+            Assert.NotEqual(0, generate.ExitCode);
+            Assert.Contains("miya-gen:", generate.StandardError, StringComparison.Ordinal);
+            Assert.Empty(Directory.EnumerateFiles(output));
+        }
+        finally
+        {
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
     private static async Task<ProcessResult> Run(string workingDirectory, params string[] arguments)
+    {
+        var result = await RunAllowingFailure(workingDirectory, arguments);
+        Assert.True(result.ExitCode == 0, result.StandardOutput + Environment.NewLine + result.StandardError);
+        return result;
+    }
+
+    private static async Task<ProcessResult> RunAllowingFailure(string workingDirectory, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("dotnet")
         {
@@ -56,9 +105,7 @@ public sealed class CliSmokeTests
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
-        var result = new ProcessResult(process.ExitCode, await output, await error);
-        Assert.True(result.ExitCode == 0, result.StandardOutput + Environment.NewLine + result.StandardError);
-        return result;
+        return new ProcessResult(process.ExitCode, await output, await error);
     }
 
     private static string FindRepositoryRoot()

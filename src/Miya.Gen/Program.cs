@@ -44,6 +44,25 @@ internal static class ProgramEntry
                 return 3;
             }
 
+            var compilationErrors = compilation
+                .GetDiagnostics()
+                .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                .Take(20)
+                .ToList();
+            if (compilationErrors.Count != 0)
+            {
+                foreach (var error in compilationErrors)
+                {
+                    Console.Error.WriteLine(error.ToString());
+                }
+
+                WriteWorkspaceFailures(workspaceFailures);
+                Console.Error.WriteLine(
+                    "miya-gen: the project does not compile, so generation would be incomplete. " +
+                    "Restore and build the project first (dotnet build), then re-run miya-gen.");
+                return 6;
+            }
+
             var naming = ReadNaming(projectPath, project);
             var result = MiyaGeneratorCore.Generate(
                 compilation,
