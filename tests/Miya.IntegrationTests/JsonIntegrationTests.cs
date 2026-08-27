@@ -1,0 +1,140 @@
+using System.Net;
+using System.Text;
+using Miya.Json;
+
+namespace Miya.IntegrationTests;
+
+public sealed class JsonIntegrationTests
+{
+    private const int TestTimeoutMilliseconds = 10_000;
+    private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(5);
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task GetReturnsCamelCaseJsonWithUtf8ContentType()
+    {
+        var app = CreateApp();
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/users/42");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json; charset=utf-8", response.Content.Headers.ContentType?.ToString());
+        Assert.Equal("{\"id\":42,\"name\":\"Ada\"}", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task PostReadsAndReturnsJsonBody()
+    {
+        var app = CreateApp();
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var content = new StringContent(
+            "{\"id\":7,\"name\":\"Grace\"}",
+            Encoding.UTF8,
+            "application/json");
+        using var response = await client.PostAsync("/users", content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json; charset=utf-8", response.Content.Headers.ContentType?.ToString());
+        Assert.Equal("{\"id\":7,\"name\":\"Grace\"}", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task InvalidJsonIsMappedToBadRequestByDefaultErrorHandler()
+    {
+        var app = CreateApp();
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var content = new StringContent(
+            "{\"id\":",
+            Encoding.UTF8,
+            "application/json");
+        using var response = await client.PostAsync("/users", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Bad Request", await response.Content.ReadAsStringAsync());
+    }
+
+    private static App CreateApp()
+    {
+        MiyaJson.Register(JsonUserCodec.Instance);
+
+        var app = new App();
+        app.Get("/users/:id", context =>
+            context.Json(new JsonUser(int.Parse(context.Param("id")), "Ada")));
+        app.Post("/users", async context =>
+        {
+            var user = await context.Req.Json<JsonUser>();
+            await context.Json(user);
+        });
+        return app;
+    }
+
+    private static Task<MiyaServer> StartAsync(App app) => app.StartAsync(
+        new MiyaOptions
+        {
+            Port = 0,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+
+    private static HttpClient CreateClient(MiyaServer server) => new()
+    {
+        BaseAddress = new Uri(server.Addresses[0]),
+        Timeout = OperationTimeout,
+    };
+}
+
+internal sealed record JsonUser(int Id, string Name);
+
+internal sealed class JsonUserCodec : IMiyaJsonCodec<JsonUser>
+{
+    public static JsonUserCodec Instance { get; } = new();
+
+    public void Write(ref MiyaJsonWriter writer, JsonUser? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull();
+            return;
+        }
+
+        writer.WriteRaw("{\"id\":"u8);
+        writer.WriteNumber(value.Id);
+        writer.WriteRaw(",\"name\":"u8);
+        writer.WriteString(value.Name);
+        writer.WriteRaw("}"u8);
+    }
+
+    public JsonUser? Read(ref MiyaJsonReader reader)
+    {
+        if (reader.TryReadNull())
+        {
+            return null;
+        }
+
+        var id = 0;
+        var name = string.Empty;
+        reader.ReadBeginObject();
+        while (!reader.TryReadEndObject())
+        {
+            var propertyName = reader.ReadPropertyName();
+            if (propertyName.SequenceEqual("id"u8))
+            {
+                id = reader.ReadInt32();
+            }
+            else if (propertyName.SequenceEqual("name"u8))
+            {
+                name = reader.ReadString() ?? throw new MiyaJsonException("The name cannot be null.");
+            }
+            else
+            {
+                reader.SkipValue();
+            }
+        }
+
+        return new JsonUser(id, name);
+    }
+}
