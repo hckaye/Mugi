@@ -18,23 +18,28 @@ public partial class App<TContext>
     /// <summary>
     /// Runs an HTTP/1.1 cleartext server and blocks the calling thread until shutdown completes.
     /// </summary>
-    public void Run(int port = 3000)
+    public void Run(int? port = null)
     {
         var options = new MiyaOptions
         {
-            Port = port,
             LoggerFactory = StderrLoggerFactory.Instance,
         };
 
-        RunAsync(options).GetAwaiter().GetResult();
+        RunAsyncCore(port, options, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     /// <summary>
     /// Runs an HTTP/1.1 cleartext server until cancellation or a termination signal requests shutdown.
     /// </summary>
-    public async Task RunAsync(MiyaOptions? options = null, CancellationToken ct = default)
+    public Task RunAsync(MiyaOptions? options = null, CancellationToken ct = default) =>
+        RunAsyncCore(explicitPort: null, options, ct);
+
+    private async Task RunAsyncCore(
+        int? explicitPort,
+        MiyaOptions? options,
+        CancellationToken ct)
     {
-        var server = await StartAsync(options, ct).ConfigureAwait(false);
+        var server = await StartAsyncCore(explicitPort, options, ct).ConfigureAwait(false);
         try
         {
             await WaitForShutdownRequestAsync(server, ct).ConfigureAwait(false);
@@ -49,13 +54,22 @@ public partial class App<TContext>
     /// Starts an HTTP/1.1 cleartext server. Calling UseHttps from ConfigureKestrel is unsupported because
     /// this manual host does not create the DI services that UseHttps requires.
     /// </summary>
-    public async Task<MiyaServer> StartAsync(
+    public Task<MiyaServer> StartAsync(
         MiyaOptions? options = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        StartAsyncCore(explicitPort: null, options, ct);
+
+    private async Task<MiyaServer> StartAsyncCore(
+        int? explicitPort,
+        MiyaOptions? options,
+        CancellationToken ct)
     {
         var effectiveOptions = options ?? new MiyaOptions();
         effectiveOptions.Validate();
-        var port = ResolvePort(effectiveOptions.Port);
+        var port = ResolvePort(
+            explicitPort,
+            effectiveOptions.Port,
+            Environment.GetEnvironmentVariable("PORT"));
         var loggerFactory = effectiveOptions.LoggerFactory ?? NullLoggerFactory.Instance;
         var kestrelOptions = new KestrelServerOptions();
         kestrelOptions.Listen(
@@ -98,30 +112,46 @@ public partial class App<TContext>
         }
     }
 
-    private static int ResolvePort(int? configuredPort)
+    internal static int ResolvePort(
+        int? explicitPort,
+        int? configuredPort,
+        string? environmentPort)
     {
+        if (explicitPort is < 0 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(explicitPort),
+                "Port must be between 0 and 65535.");
+        }
+
+        if (explicitPort.HasValue)
+        {
+            return explicitPort.Value;
+        }
+
+        if (configuredPort is < 0 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(configuredPort),
+                "Port must be between 0 and 65535.");
+        }
+
         if (configuredPort.HasValue)
         {
             return configuredPort.Value;
         }
 
-        var environmentPort = Environment.GetEnvironmentVariable("PORT");
-        if (environmentPort is null)
-        {
-            return 3000;
-        }
-
-        if (!int.TryParse(
+        if (int.TryParse(
                 environmentPort,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
                 out var port)
-            || port is < 0 or > 65535)
+            && port is >= 0 and <= 65535)
         {
-            throw new InvalidOperationException("PORT must be an integer between 0 and 65535.");
+            return port;
         }
 
-        return port;
+        return 3000;
     }
 
     private static async Task WaitForShutdownRequestAsync(

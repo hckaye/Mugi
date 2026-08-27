@@ -31,6 +31,19 @@ if (args.Contains("--spanjson", StringComparer.Ordinal))
     var forwarded = args.Where(argument => !string.Equals(argument, "--spanjson", StringComparison.Ordinal)).ToArray();
     BenchmarkRunner.Run<SpanJsonReferenceBenchmarks>(jitConfig, forwarded);
 }
+else if (args.Contains("--routing", StringComparer.Ordinal))
+{
+    var jitOnly = args.Contains("--jit-only", StringComparer.Ordinal);
+    var aotOnly = args.Contains("--aot-only", StringComparer.Ordinal);
+    var forwarded = args.Where(argument =>
+        !string.Equals(argument, "--routing", StringComparison.Ordinal) &&
+        !string.Equals(argument, "--jit-only", StringComparison.Ordinal) &&
+        !string.Equals(argument, "--aot-only", StringComparison.Ordinal)).ToArray();
+    var config = aotOnly ? aotConfig : jitOnly ? jitConfig : mainConfig;
+    var switcherArguments = forwarded.Length == 0 ? ["--filter", "*"] : forwarded;
+    BenchmarkSwitcher.FromTypes([typeof(RoutingBenchmarks), typeof(PipelineBenchmarks)])
+        .Run(switcherArguments, config);
+}
 else
 {
     var jitOnly = args.Contains("--jit-only", StringComparer.Ordinal);
