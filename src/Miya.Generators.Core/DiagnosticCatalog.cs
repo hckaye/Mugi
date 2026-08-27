@@ -93,4 +93,36 @@ internal static class DiagnosticCatalog
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InvalidOpenApiDocument = new(
+        "MIYA020",
+        "The OpenAPI document is invalid",
+        "OpenAPI document '{0}' is invalid: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor UnsupportedOpenApiSchema = new(
+        "MIYA021",
+        "The OpenAPI schema structure is not supported",
+        "OpenAPI schema '{0}' is skipped: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor UnrepresentableOpenApiItem = new(
+        "MIYA022",
+        "The OpenAPI item cannot be represented by Miya",
+        "OpenAPI item '{0}' is skipped: {1}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor OpenApiNameCollision = new(
+        "MIYA023",
+        "OpenAPI names produce the same C# name",
+        "OpenAPI name '{0}' collides with generated C# name '{1}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

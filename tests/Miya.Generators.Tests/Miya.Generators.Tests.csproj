@@ -23,6 +23,7 @@
     <Compile Remove="fixtures/**/*.cs" />
     <Compile Remove="packaging/**/*.cs" />
     <None Include="fixtures/**/*" />
+    <None Update="fixtures/OpenApiImport/openapi.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
