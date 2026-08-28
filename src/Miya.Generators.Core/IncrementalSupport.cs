@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
 
@@ -39,6 +40,17 @@ internal sealed class JsonInvocationCandidate
                 builder.Append(':');
                 builder.Append(property.Property.IsRequired ? 'R' : 'O');
                 builder.Append(property.IsPrimary ? 'P' : 'S');
+                if (property.PrimaryParameter is not null)
+                {
+                    builder.Append(property.PrimaryParameter.HasExplicitDefaultValue ? 'D' : 'N');
+                    if (property.PrimaryParameter.HasExplicitDefaultValue)
+                    {
+                        builder.Append(':');
+                        builder.Append(Convert.ToString(
+                            property.PrimaryParameter.ExplicitDefaultValue,
+                            CultureInfo.InvariantCulture));
+                    }
+                }
             }
 
             builder.Append(';');

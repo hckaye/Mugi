@@ -15,6 +15,11 @@ internal static class ProgramEntry
             return await RunImport(args).ConfigureAwait(false);
         }
 
+        if (args.Length != 0 && args[0] == "client")
+        {
+            return await RunClient(args).ConfigureAwait(false);
+        }
+
         if (!TryParseArguments(args, out var options, out var argumentError))
         {
             Console.Error.WriteLine("miya-gen: " + argumentError);
@@ -201,6 +206,118 @@ internal static class ProgramEntry
         }
     }
 
+    private static async Task<int> RunClient(string[] args)
+    {
+        if (!TryParseClientArguments(
+                args,
+                out var input,
+                out var output,
+                out var clientNamespace,
+                out var className,
+                out var error))
+        {
+            Console.Error.WriteLine("miya-gen: " + error);
+            Console.Error.WriteLine(
+                "Usage: miya-gen client --input <openapi.json> --output <directory> "
+                + "[--namespace <namespace>] [--class-name <name>]");
+            return 2;
+        }
+
+        var inputPath = Path.GetFullPath(input!);
+        var outputPath = Path.GetFullPath(output!);
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine("miya-gen: OpenAPI document does not exist: " + inputPath);
+            return 2;
+        }
+
+        try
+        {
+            var content = await File.ReadAllTextAsync(inputPath).ConfigureAwait(false);
+            var result = OpenApiClientGenerator.Generate(
+                new OpenApiImportInput(
+                    inputPath,
+                    content,
+                    string.IsNullOrWhiteSpace(clientNamespace) ? "Generated" : clientNamespace!,
+                    JsonNaming.CamelCase,
+                    className),
+                CancellationToken.None);
+
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                Console.Error.WriteLine(diagnostic.Severity + " " + diagnostic.Id + ": " + diagnostic.GetMessage());
+            }
+
+            if (result.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            {
+                Console.Error.WriteLine("miya-gen: client generation failed because the OpenAPI document has errors.");
+                return 4;
+            }
+
+            Directory.CreateDirectory(outputPath);
+            var baseName = SanitizeFileName(Path.GetFileNameWithoutExtension(inputPath));
+            foreach (var oldFile in Directory.EnumerateFiles(
+                         outputPath,
+                         "Miya.OpenApiClient.*.g.cs",
+                         SearchOption.TopDirectoryOnly))
+            {
+                if (IsGeneratedClientOutputForBaseName(Path.GetFileName(oldFile), baseName))
+                {
+                    File.Delete(oldFile);
+                }
+            }
+
+            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            for (var index = 0; index < result.Sources.Length; index++)
+            {
+                var suffix = result.Sources.Length == 1 ? string.Empty : "." + index;
+                var destination = Path.Combine(outputPath, "Miya.OpenApiClient." + baseName + suffix + ".g.cs");
+                await File.WriteAllTextAsync(destination, result.Sources[index].Source, encoding).ConfigureAwait(false);
+                Console.WriteLine(destination);
+            }
+
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine("miya-gen: " + exception.Message);
+            return 5;
+        }
+    }
+
+    private static bool IsGeneratedClientOutputForBaseName(string fileName, string baseName)
+    {
+        var prefix = "Miya.OpenApiClient." + baseName;
+        const string suffix = ".g.cs";
+        if (string.Equals(fileName, prefix + suffix, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!fileName.StartsWith(prefix + ".", StringComparison.Ordinal)
+            || !fileName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var indexStart = prefix.Length + 1;
+        var indexLength = fileName.Length - indexStart - suffix.Length;
+        if (indexLength == 0)
+        {
+            return false;
+        }
+
+        for (var index = indexStart; index < indexStart + indexLength; index++)
+        {
+            if (!char.IsDigit(fileName[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static string SanitizeFileName(string name)
     {
         var builder = new StringBuilder(name.Length);
@@ -248,6 +365,60 @@ internal static class ProgramEntry
                     break;
                 default:
                     importNamespace = args[index];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(output))
+        {
+            error = "both --input and --output are required.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryParseClientArguments(
+        string[] args,
+        out string? input,
+        out string? output,
+        out string? clientNamespace,
+        out string? className,
+        out string? error)
+    {
+        input = null;
+        output = null;
+        clientNamespace = null;
+        className = null;
+        error = null;
+        for (var index = 1; index < args.Length; index++)
+        {
+            var argument = args[index];
+            if (argument is not ("--input" or "--output" or "--namespace" or "--class-name"))
+            {
+                error = "unknown argument '" + argument + "'.";
+                return false;
+            }
+
+            if (++index >= args.Length)
+            {
+                error = "argument '" + argument + "' requires a value.";
+                return false;
+            }
+
+            switch (argument)
+            {
+                case "--input":
+                    input = args[index];
+                    break;
+                case "--output":
+                    output = args[index];
+                    break;
+                case "--namespace":
+                    clientNamespace = args[index];
+                    break;
+                default:
+                    className = args[index];
                     break;
             }
         }

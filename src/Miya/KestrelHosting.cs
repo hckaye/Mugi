@@ -74,6 +74,9 @@ public partial class App<TContext>
             explicitPort,
             effectiveOptions.Port,
             Environment.GetEnvironmentVariable("PORT"));
+        var address = ResolveAddress(
+            effectiveOptions.Address,
+            Environment.GetEnvironmentVariable("HOST"));
         var loggerFactory = effectiveOptions.LoggerFactory ?? NullLoggerFactory.Instance;
         var protocols = effectiveOptions.Protocols;
 
@@ -87,16 +90,17 @@ public partial class App<TContext>
             && (protocols & Protocols.Http3) != 0
             && (protocols & (Protocols.Http1 | Protocols.Http2)) != 0)
         {
-            port = FindAvailableTcpAndUdpPort();
+            port = FindAvailableTcpAndUdpPort(address);
         }
 
         return effectiveOptions.Certificate is null && effectiveOptions.ConfigureServices is null
-            ? await StartDirectAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false)
-            : await StartServiceBackedAsync(effectiveOptions, port, protocols, loggerFactory, ct).ConfigureAwait(false);
+            ? await StartDirectAsync(effectiveOptions, address, port, protocols, loggerFactory, ct).ConfigureAwait(false)
+            : await StartServiceBackedAsync(effectiveOptions, address, port, protocols, loggerFactory, ct).ConfigureAwait(false);
     }
 
     private async Task<Server> StartDirectAsync(
         AppOptions options,
+        IPAddress address,
         int port,
         Protocols protocols,
         ILoggerFactory loggerFactory,
@@ -104,7 +108,7 @@ public partial class App<TContext>
     {
         var kestrelOptions = new KestrelServerOptions();
         kestrelOptions.Listen(
-            IPAddress.Loopback,
+            address,
             port,
             listenOptions => ConfigureListenOptions(listenOptions, options, protocols, loggerFactory));
         options.ConfigureKestrel?.Invoke(kestrelOptions);
@@ -138,6 +142,7 @@ public partial class App<TContext>
 
     private async Task<Server> StartServiceBackedAsync(
         AppOptions options,
+        IPAddress address,
         int port,
         Protocols protocols,
         ILoggerFactory loggerFactory,
@@ -159,7 +164,7 @@ public partial class App<TContext>
                     .UseKestrel(kestrelOptions =>
                     {
                         kestrelOptions.Listen(
-                            IPAddress.Loopback,
+                            address,
                             port,
                             listenOptions => ConfigureListenOptions(
                                 listenOptions,
@@ -246,21 +251,22 @@ public partial class App<TContext>
         return addresses;
     }
 
-    private static int FindAvailableTcpAndUdpPort()
+    private static int FindAvailableTcpAndUdpPort(IPAddress address)
     {
         // Kestrel cannot assign one dynamic port to a combined TCP and QUIC endpoint. Select a port
         // that is free for both transports before Kestrel binds it.
         const int maximumAttempts = 10;
+        var family = address.AddressFamily;
         for (var attempt = 0; attempt < maximumAttempts; attempt++)
         {
-            using var tcpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            tcpSocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            using var tcpSocket = new Socket(family, SocketType.Stream, ProtocolType.Tcp);
+            tcpSocket.Bind(new IPEndPoint(address, 0));
             var port = ((IPEndPoint)tcpSocket.LocalEndPoint!).Port;
 
-            using var udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            using var udpSocket = new Socket(family, SocketType.Dgram, ProtocolType.Udp);
             try
             {
-                udpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                udpSocket.Bind(new IPEndPoint(address, port));
                 return port;
             }
             catch (SocketException) when (attempt + 1 < maximumAttempts)
@@ -268,7 +274,7 @@ public partial class App<TContext>
             }
         }
 
-        throw new IOException("Unable to find a loopback port available for both TCP and UDP.");
+        throw new IOException("Unable to find a port available for both TCP and UDP.");
     }
 
     internal static int ResolvePort(
@@ -313,6 +319,23 @@ public partial class App<TContext>
         return 3000;
     }
 
+    internal static IPAddress ResolveAddress(
+        IPAddress? configuredAddress,
+        string? environmentHost)
+    {
+        if (configuredAddress is not null)
+        {
+            return configuredAddress;
+        }
+
+        if (IPAddress.TryParse(environmentHost, out var address))
+        {
+            return address;
+        }
+
+        return IPAddress.Loopback;
+    }
+
     private static async Task WaitForShutdownRequestAsync(
         Server server,
         CancellationToken cancellationToken)
@@ -328,15 +351,10 @@ public partial class App<TContext>
         await server.StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
-    private static PosixSignalRegistration? RegisterSignal(
+    internal static PosixSignalRegistration RegisterSignal(
         PosixSignal signal,
         ShutdownSignal shutdown)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return null;
-        }
-
         return PosixSignalRegistration.Create(signal, context =>
         {
             if (shutdown.Request())
@@ -349,7 +367,7 @@ public partial class App<TContext>
         });
     }
 
-    private sealed class ShutdownSignal
+    internal sealed class ShutdownSignal
     {
         private readonly TaskCompletionSource _requested = new(
             TaskCreationOptions.RunContinuationsAsynchronously);

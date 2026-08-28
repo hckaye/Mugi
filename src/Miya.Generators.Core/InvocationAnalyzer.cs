@@ -88,7 +88,8 @@ internal static class InvocationAnalyzer
                 invocation,
                 symbol,
                 cancellationToken,
-                out var schemaDefinition))
+                out var schemaDefinition,
+                out var schemaPartDefinition))
         {
             return new InvocationAnalysis(
                 invocation,
@@ -97,8 +98,12 @@ internal static class InvocationAnalyzer
                 null,
                 null,
                 null,
-                schemaDefinition!.Diagnostic,
-                schemaDefinition: schemaDefinition);
+                null,
+                schemaDefinition: schemaDefinition,
+                schemaPartDefinition: schemaPartDefinition,
+                diagnostics: schemaDefinition is not null
+                    ? schemaDefinition.Diagnostics
+                    : schemaPartDefinition!.Diagnostics);
         }
 
         if (TryGetSchemaEndpoint(
@@ -209,10 +214,13 @@ internal static class InvocationAnalyzer
         InvocationExpressionSyntax invocation,
         IMethodSymbol method,
         CancellationToken cancellationToken,
-        out SchemaDefinition? definition)
+        out SchemaDefinition? definition,
+        out SchemaPartDefinition? partDefinition)
     {
         definition = null;
-        if (method.Name != "For"
+        partDefinition = null;
+        var isPart = method.Name == "Part";
+        if (method.Name is not ("For" or "Part")
             || method.TypeArguments.Length != 1
             || GetMetadataName(method.ContainingType) != "Miya.Schema.Schemas")
         {
@@ -221,16 +229,31 @@ internal static class InvocationAnalyzer
 
         var inputType = method.TypeArguments[0];
         var fields = ImmutableArray.CreateBuilder<SchemaFieldDeclaration>();
+        var parts = ImmutableArray.CreateBuilder<SchemaPartUse>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        Diagnostic? diagnostic = null;
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var current = invocation;
         while (current.Parent is MemberAccessExpressionSyntax memberAccess
                && ReferenceEquals(memberAccess.Expression, current)
                && memberAccess.Parent is InvocationExpressionSyntax next)
         {
             var builderMethod = semanticModel.GetSymbolInfo(next, cancellationToken).Symbol as IMethodSymbol;
-            if (builderMethod is null
-                || GetMetadataName(builderMethod.ContainingType.OriginalDefinition) != "Miya.Schema.Schema`1")
+            if (builderMethod is null)
+            {
+                break;
+            }
+
+            if (!isPart && TryGetSchemaPartUse(builderMethod, out var partType))
+            {
+                parts.Add(new SchemaPartUse(partType!, next.GetLocation()));
+                current = next;
+                continue;
+            }
+
+            var expectedBuilderType = isPart
+                ? "Miya.Schema.SchemaPart`1"
+                : "Miya.Schema.Schema`1";
+            if (GetMetadataName(builderMethod.ContainingType.OriginalDefinition) != expectedBuilderType)
             {
                 break;
             }
@@ -247,6 +270,9 @@ internal static class InvocationAnalyzer
                 case "Body":
                     source = SchemaFieldSource.Body;
                     break;
+                case "Form":
+                    source = SchemaFieldSource.Form;
+                    break;
                 case "Header":
                     source = SchemaFieldSource.Header;
                     break;
@@ -254,7 +280,7 @@ internal static class InvocationAnalyzer
                     break;
             }
 
-            if (builderMethod.Name is not ("Route" or "Query" or "Body" or "Header"))
+            if (builderMethod.Name is not ("Route" or "Query" or "Body" or "Form" or "Header"))
             {
                 break;
             }
@@ -267,33 +293,36 @@ internal static class InvocationAnalyzer
                     out var selector)
                 || !TryGetSelectedProperty(semanticModel, selector, cancellationToken, out var property))
             {
-                diagnostic ??= Diagnostic.Create(
+                diagnostics.Add(Diagnostic.Create(
                     DiagnosticCatalog.InvalidSchemaDefinition,
                     next.GetLocation(),
                     inputType.ToDisplayString(),
-                    "field selectors must have the form 'value => value.Property'");
+                    "field selectors must have the form 'value => value.Property'"));
                 current = next;
                 continue;
             }
 
-            if (!SymbolEqualityComparer.Default.Equals(property!.ContainingType, inputType))
+            var selectedProperty = property!;
+            if (!(isPart
+                    ? IsPropertyDeclaredByPartType(selectedProperty, inputType)
+                    : SymbolEqualityComparer.Default.Equals(selectedProperty.ContainingType, inputType)))
             {
-                diagnostic ??= Diagnostic.Create(
+                diagnostics.Add(Diagnostic.Create(
                     DiagnosticCatalog.InvalidSchemaDefinition,
                     selector.GetLocation(),
                     inputType.ToDisplayString(),
-                    "a field selector refers to a property on another type");
+                    "a field selector refers to a property on another type"));
                 current = next;
                 continue;
             }
 
-            if (!names.Add(property.Name))
+            if (!names.Add(selectedProperty.Name))
             {
-                diagnostic ??= Diagnostic.Create(
+                diagnostics.Add(Diagnostic.Create(
                     DiagnosticCatalog.InvalidSchemaDefinition,
                     selector.GetLocation(),
                     inputType.ToDisplayString(),
-                    "field '" + property.Name + "' is configured more than once");
+                    "field '" + selectedProperty.Name + "' is configured more than once"));
                 current = next;
                 continue;
             }
@@ -312,11 +341,11 @@ internal static class InvocationAnalyzer
                     || !(semanticModel.GetConstantValue(headerExpression, cancellationToken).Value is string constantHeader)
                     || constantHeader.Length == 0)
                 {
-                    diagnostic ??= Diagnostic.Create(
+                    diagnostics.Add(Diagnostic.Create(
                         DiagnosticCatalog.InvalidSchemaDefinition,
                         next.GetLocation(),
                         inputType.ToDisplayString(),
-                        "header names must be non-empty constant strings");
+                        "header names must be non-empty constant strings"));
                 }
                 else
                 {
@@ -328,12 +357,11 @@ internal static class InvocationAnalyzer
                 semanticModel,
                 next,
                 builderMethod,
-                property,
+                selectedProperty,
                 cancellationToken,
-                ref diagnostic,
-                inputType);
+                diagnostics);
             fields.Add(new SchemaFieldDeclaration(
-                property,
+                selectedProperty,
                 source,
                 headerName,
                 rules,
@@ -341,12 +369,66 @@ internal static class InvocationAnalyzer
             current = next;
         }
 
-        definition = new SchemaDefinition(
-            inputType,
-            fields.ToImmutable(),
-            diagnostic,
-            invocation.GetLocation());
+        if (isPart)
+        {
+            partDefinition = new SchemaPartDefinition(
+                inputType,
+                fields.ToImmutable(),
+                diagnostics.ToImmutable(),
+                invocation.GetLocation());
+        }
+        else
+        {
+            definition = new SchemaDefinition(
+                inputType,
+                fields.ToImmutable(),
+                parts.ToImmutable(),
+                diagnostics.ToImmutable(),
+                invocation.GetLocation());
+        }
+
         return true;
+    }
+
+    private static bool TryGetSchemaPartUse(IMethodSymbol method, out ITypeSymbol? partType)
+    {
+        partType = null;
+        var declaredMethod = method.ReducedFrom ?? method;
+        if (method.Name != "Use"
+            || GetMetadataName(declaredMethod.ContainingType) != "Miya.Schema.SchemaPartExtensions"
+            || method.TypeArguments.Length != 2)
+        {
+            return false;
+        }
+
+        partType = method.TypeArguments[1];
+        return true;
+    }
+
+    private static bool IsPropertyDeclaredByPartType(IPropertySymbol property, ITypeSymbol partType)
+    {
+        if (property.IsStatic || !(partType is INamedTypeSymbol namedPartType))
+        {
+            return false;
+        }
+
+        for (var current = namedPartType; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(property.ContainingType, current))
+            {
+                return true;
+            }
+        }
+
+        foreach (var @interface in namedPartType.AllInterfaces)
+        {
+            if (SymbolEqualityComparer.Default.Equals(property.ContainingType, @interface))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ImmutableArray<SchemaRuleDeclaration> ParseRules(
@@ -355,8 +437,7 @@ internal static class InvocationAnalyzer
         IMethodSymbol builderMethod,
         IPropertySymbol property,
         CancellationToken cancellationToken,
-        ref Diagnostic? diagnostic,
-        ITypeSymbol inputType)
+        ImmutableArray<Diagnostic>.Builder diagnostics)
     {
         var rulesParameter = builderMethod.Parameters.FirstOrDefault(static parameter => parameter.Name == "rules");
         if (rulesParameter is null
@@ -365,28 +446,47 @@ internal static class InvocationAnalyzer
                 builderInvocation,
                 rulesParameter.Ordinal,
                 cancellationToken,
-                out var rulesExpression)
-            || !(rulesExpression is LambdaExpressionSyntax rulesLambda))
+                out var rulesExpression))
         {
             return ImmutableArray<SchemaRuleDeclaration>.Empty;
         }
 
-        var result = ImmutableArray.CreateBuilder<SchemaRuleDeclaration>();
-        foreach (var ruleInvocation in rulesLambda.DescendantNodesAndSelf()
-                     .OfType<InvocationExpressionSyntax>()
-                     .OrderBy(static item => item.SpanStart)
-                     .ThenBy(static item => item.Span.Length))
+        var constant = semanticModel.GetConstantValue(rulesExpression, cancellationToken);
+        if (constant.HasValue && constant.Value is null)
         {
-            var ruleMethod = semanticModel.GetSymbolInfo(ruleInvocation, cancellationToken).Symbol as IMethodSymbol;
-            if (ruleMethod is null
-                || GetMetadataName(ruleMethod.ContainingType.OriginalDefinition) != "Miya.Schema.Rule`1"
-                || !TryGetRuleKind(ruleMethod.Name, out var kind))
-            {
-                continue;
-            }
+            return ImmutableArray<SchemaRuleDeclaration>.Empty;
+        }
+
+        if (!TryResolveRuleChain(
+                semanticModel,
+                rulesExpression,
+                cancellationToken,
+                out var ruleSemanticModel,
+                out var ruleChain,
+                out var ruleParameter)
+            || !TryCollectRuleInvocations(
+                ruleSemanticModel,
+                ruleChain,
+                ruleParameter,
+                cancellationToken,
+                out var ruleInvocations))
+        {
+            diagnostics.Add(Diagnostic.Create(
+                DiagnosticCatalog.InvalidSchemaRuleDeclaration,
+                rulesExpression.GetLocation()));
+            return ImmutableArray<SchemaRuleDeclaration>.Empty;
+        }
+
+        var result = ImmutableArray.CreateBuilder<SchemaRuleDeclaration>();
+        foreach (var ruleInvocation in ruleInvocations)
+        {
+            var ruleMethod = (IMethodSymbol)ruleSemanticModel.GetSymbolInfo(
+                ruleInvocation,
+                cancellationToken).Symbol!;
+            _ = TryGetRuleKind(ruleMethod.Name, out var kind);
 
             var arguments = new List<ExpressionSyntax>();
-            if (semanticModel.GetOperation(ruleInvocation, cancellationToken) is IInvocationOperation operation)
+            if (ruleSemanticModel.GetOperation(ruleInvocation, cancellationToken) is IInvocationOperation operation)
             {
                 arguments.AddRange(operation.Arguments
                     .OrderBy(static argument => argument.Parameter?.Ordinal ?? int.MaxValue)
@@ -399,45 +499,61 @@ internal static class InvocationAnalyzer
             if (kind == SchemaRuleKind.Must)
             {
                 if (arguments.Count != 2
-                    || !(semanticModel.GetConstantValue(arguments[1], cancellationToken).Value is string constantMessage)
+                    || !(ruleSemanticModel.GetConstantValue(arguments[1], cancellationToken).Value is string constantMessage)
                     || constantMessage.Length == 0)
                 {
-                    diagnostic ??= InvalidRule(
+                    diagnostics.Add(InvalidRule(
                         ruleInvocation,
                         ruleMethod.Name,
                         property.Name,
-                        "Must requires a predicate and a non-empty constant message");
+                        "Must requires a predicate and a non-empty constant message"));
                     continue;
                 }
 
                 if (arguments[0] is LambdaExpressionSyntax predicateLambda)
                 {
-                    var flow = semanticModel.AnalyzeDataFlow(predicateLambda);
+                    var flow = ruleSemanticModel.AnalyzeDataFlow(predicateLambda);
                     if (flow is null || !flow.Succeeded || flow.CapturedInside.Length != 0)
                     {
-                        diagnostic ??= InvalidRule(
+                        diagnostics.Add(InvalidRule(
                             ruleInvocation,
                             ruleMethod.Name,
                             property.Name,
-                            "Must predicates cannot capture local state");
+                            "Must predicates cannot capture local state"));
                         continue;
                     }
 
-                    predicate = arguments[0].ToString();
+                    var inaccessibleMember = FindInaccessibleGeneratedMember(
+                        predicateLambda,
+                        ruleSemanticModel,
+                        cancellationToken);
+                    if (inaccessibleMember is not null)
+                    {
+                        diagnostics.Add(InaccessibleRuleMember(arguments[0], inaccessibleMember));
+                        continue;
+                    }
+
+                    predicate = QualifyPredicate(predicateLambda, ruleSemanticModel);
                 }
-                else if (semanticModel.GetSymbolInfo(arguments[0], cancellationToken).Symbol is IMethodSymbol predicateMethod
+                else if (ruleSemanticModel.GetSymbolInfo(arguments[0], cancellationToken).Symbol is IMethodSymbol predicateMethod
                          && predicateMethod.IsStatic)
                 {
+                    if (!IsAccessibleFromGeneratedCode(predicateMethod, ruleSemanticModel.Compilation))
+                    {
+                        diagnostics.Add(InaccessibleRuleMember(arguments[0], predicateMethod));
+                        continue;
+                    }
+
                     predicate = TypeNames.Display(predicateMethod.ContainingType) + "." +
                         GeneratedNaming.Identifier(predicateMethod.Name);
                 }
                 else
                 {
-                    diagnostic ??= InvalidRule(
+                    diagnostics.Add(InvalidRule(
                         ruleInvocation,
                         ruleMethod.Name,
                         property.Name,
-                        "Must predicates must be non-capturing lambdas or static method groups");
+                        "Must predicates must be non-capturing lambdas or static method groups"));
                     continue;
                 }
 
@@ -448,23 +564,23 @@ internal static class InvocationAnalyzer
                 var constantsValid = true;
                 foreach (var argument in arguments)
                 {
-                    var constant = semanticModel.GetConstantValue(argument, cancellationToken);
-                    if (!constant.HasValue)
+                    var argumentConstant = ruleSemanticModel.GetConstantValue(argument, cancellationToken);
+                    if (!argumentConstant.HasValue)
                     {
                         constantsValid = false;
                         break;
                     }
 
-                    values.Add(constant.Value);
+                    values.Add(argumentConstant.Value);
                 }
 
                 if (!constantsValid)
                 {
-                    diagnostic ??= InvalidRule(
+                    diagnostics.Add(InvalidRule(
                         ruleInvocation,
                         ruleMethod.Name,
                         property.Name,
-                        "rule arguments must be compile-time constants");
+                        "rule arguments must be compile-time constants"));
                     continue;
                 }
             }
@@ -489,6 +605,452 @@ internal static class InvocationAnalyzer
                 ruleName,
                 fieldName,
                 reason);
+
+        Diagnostic InaccessibleRuleMember(ExpressionSyntax syntax, ISymbol member) => Diagnostic.Create(
+            DiagnosticCatalog.InaccessibleSchemaRuleMember,
+            syntax.GetLocation(),
+            member.ToDisplayString());
+    }
+
+    private static bool TryResolveRuleChain(
+        SemanticModel semanticModel,
+        ExpressionSyntax rulesExpression,
+        CancellationToken cancellationToken,
+        out SemanticModel ruleSemanticModel,
+        out ExpressionSyntax ruleChain,
+        out IParameterSymbol ruleParameter)
+    {
+        rulesExpression = UnwrapParentheses(rulesExpression);
+        if (rulesExpression is LambdaExpressionSyntax lambda)
+        {
+            if (!TryGetLambdaParameter(
+                    semanticModel,
+                    lambda,
+                    cancellationToken,
+                    out var lambdaParameter)
+                || !TryGetSingleExpression(lambda, out var lambdaExpression))
+            {
+                ruleSemanticModel = null!;
+                ruleChain = null!;
+                ruleParameter = null!;
+                return false;
+            }
+
+            if (TryGetForwardedRuleMethod(
+                    semanticModel,
+                    lambdaExpression,
+                    lambdaParameter!,
+                    cancellationToken,
+                    out var forwardedMethod))
+            {
+                return TryGetRuleMethodChain(
+                    semanticModel,
+                    forwardedMethod!,
+                    cancellationToken,
+                    out ruleSemanticModel,
+                    out ruleChain,
+                    out ruleParameter);
+            }
+
+            ruleSemanticModel = semanticModel;
+            ruleChain = lambdaExpression;
+            ruleParameter = lambdaParameter!;
+            return true;
+        }
+
+        if (rulesExpression is BaseObjectCreationExpressionSyntax creation)
+        {
+            var argumentList = creation.ArgumentList;
+            if (argumentList is null || argumentList.Arguments.Count != 1)
+            {
+                ruleSemanticModel = null!;
+                ruleChain = null!;
+                ruleParameter = null!;
+                return false;
+            }
+
+            rulesExpression = UnwrapParentheses(argumentList.Arguments[0].Expression);
+        }
+
+        var method = semanticModel.GetSymbolInfo(rulesExpression, cancellationToken).Symbol as IMethodSymbol;
+        return TryGetRuleMethodChain(
+            semanticModel,
+            method,
+            cancellationToken,
+            out ruleSemanticModel,
+            out ruleChain,
+            out ruleParameter);
+    }
+
+    private static bool TryGetLambdaParameter(
+        SemanticModel semanticModel,
+        LambdaExpressionSyntax lambda,
+        CancellationToken cancellationToken,
+        out IParameterSymbol? parameter)
+    {
+        ParameterSyntax? parameterSyntax = lambda switch
+        {
+            SimpleLambdaExpressionSyntax simple => simple.Parameter,
+            ParenthesizedLambdaExpressionSyntax parenthesized
+                when parenthesized.ParameterList.Parameters.Count == 1 =>
+                parenthesized.ParameterList.Parameters[0],
+            _ => null,
+        };
+        parameter = parameterSyntax is null
+            ? null
+            : semanticModel.GetDeclaredSymbol(parameterSyntax, cancellationToken);
+        return parameter is not null;
+    }
+
+    private static bool TryGetSingleExpression(
+        LambdaExpressionSyntax lambda,
+        out ExpressionSyntax expression)
+    {
+        if (lambda.Body is ExpressionSyntax expressionBody)
+        {
+            expression = expressionBody;
+            return true;
+        }
+
+        if (lambda.Body is BlockSyntax { Statements.Count: 1 } block
+            && block.Statements[0] is ExpressionStatementSyntax expressionStatement)
+        {
+            expression = expressionStatement.Expression;
+            return true;
+        }
+
+        expression = null!;
+        return false;
+    }
+
+    private static bool TryGetForwardedRuleMethod(
+        SemanticModel semanticModel,
+        ExpressionSyntax expression,
+        IParameterSymbol parameter,
+        CancellationToken cancellationToken,
+        out IMethodSymbol? method)
+    {
+        method = null;
+        expression = UnwrapParentheses(expression);
+        if (!(expression is InvocationExpressionSyntax invocation)
+            || invocation.ArgumentList.Arguments.Count != 1
+            || !(semanticModel.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol target)
+            || (GetMetadataName(target.ContainingType.OriginalDefinition) == "Miya.Schema.Rule`1"
+                && TryGetRuleKind(target.Name, out _))
+            || !TryGetReferencedParameter(
+                semanticModel,
+                invocation.ArgumentList.Arguments[0].Expression,
+                cancellationToken,
+                out var referencedParameter)
+            || !SymbolEqualityComparer.Default.Equals(parameter, referencedParameter))
+        {
+            return false;
+        }
+
+        method = target;
+        return true;
+    }
+
+    private static bool TryGetRuleMethodChain(
+        SemanticModel semanticModel,
+        IMethodSymbol? method,
+        CancellationToken cancellationToken,
+        out SemanticModel ruleSemanticModel,
+        out ExpressionSyntax ruleChain,
+        out IParameterSymbol ruleParameter)
+    {
+        ruleSemanticModel = null!;
+        ruleChain = null!;
+        ruleParameter = null!;
+        if (method is null
+            || !method.IsStatic
+            || method.Parameters.Length != 1
+            || !SymbolEqualityComparer.Default.Equals(
+                method.ContainingAssembly,
+                semanticModel.Compilation.Assembly))
+        {
+            return false;
+        }
+
+        foreach (var syntaxReference in method.DeclaringSyntaxReferences)
+        {
+            if (!(syntaxReference.GetSyntax(cancellationToken) is MethodDeclarationSyntax declaration)
+                || declaration.ParameterList.Parameters.Count != 1)
+            {
+                continue;
+            }
+
+            ExpressionSyntax? expression = declaration.ExpressionBody?.Expression;
+            if (expression is null
+                && declaration.Body is BlockSyntax { Statements.Count: 1 } body
+                && body.Statements[0] is ExpressionStatementSyntax expressionStatement)
+            {
+                expression = expressionStatement.Expression;
+            }
+
+            if (expression is null)
+            {
+                continue;
+            }
+
+            var bodySemanticModel = semanticModel.Compilation.GetSemanticModel(declaration.SyntaxTree);
+            var parameter = bodySemanticModel.GetDeclaredSymbol(
+                declaration.ParameterList.Parameters[0],
+                cancellationToken);
+            if (parameter is null)
+            {
+                continue;
+            }
+
+            ruleSemanticModel = bodySemanticModel;
+            ruleChain = expression;
+            ruleParameter = parameter;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryCollectRuleInvocations(
+        SemanticModel semanticModel,
+        ExpressionSyntax expression,
+        IParameterSymbol parameter,
+        CancellationToken cancellationToken,
+        out ImmutableArray<InvocationExpressionSyntax> invocations)
+    {
+        var result = new List<InvocationExpressionSyntax>();
+        expression = UnwrapParentheses(expression);
+        while (expression is InvocationExpressionSyntax invocation
+               && semanticModel.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol method
+               && GetMetadataName(method.ContainingType.OriginalDefinition) == "Miya.Schema.Rule`1"
+               && TryGetRuleKind(method.Name, out _)
+               && invocation.Expression is MemberAccessExpressionSyntax memberAccess)
+        {
+            result.Add(invocation);
+            var receiver = UnwrapParentheses(memberAccess.Expression);
+            if (TryGetReferencedParameter(
+                    semanticModel,
+                    receiver,
+                    cancellationToken,
+                    out var referencedParameter)
+                && SymbolEqualityComparer.Default.Equals(parameter, referencedParameter))
+            {
+                result.Reverse();
+                invocations = result.ToImmutableArray();
+                return true;
+            }
+
+            expression = receiver;
+        }
+
+        invocations = ImmutableArray<InvocationExpressionSyntax>.Empty;
+        return false;
+    }
+
+    private static bool TryGetReferencedParameter(
+        SemanticModel semanticModel,
+        ExpressionSyntax expression,
+        CancellationToken cancellationToken,
+        out IParameterSymbol? parameter)
+    {
+        expression = UnwrapParentheses(expression);
+        parameter = semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol as IParameterSymbol;
+        return parameter is not null;
+    }
+
+    private static ExpressionSyntax UnwrapParentheses(ExpressionSyntax expression)
+    {
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
+        {
+            expression = parenthesized.Expression;
+        }
+
+        return expression;
+    }
+
+    private static ISymbol? FindInaccessibleGeneratedMember(
+        LambdaExpressionSyntax predicate,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        foreach (var name in predicate.DescendantNodes().OfType<SimpleNameSyntax>())
+        {
+            var symbol = semanticModel.GetSymbolInfo(name, cancellationToken).Symbol;
+            if (symbol is IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol or INamedTypeSymbol
+                && symbol is not IParameterSymbol
+                && !IsAccessibleFromGeneratedCode(symbol, semanticModel.Compilation))
+            {
+                return symbol;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsAccessibleFromGeneratedCode(ISymbol symbol, Compilation compilation)
+    {
+        if (symbol is IMethodSymbol { MethodKind: MethodKind.LocalFunction })
+        {
+            return false;
+        }
+
+        for (var current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (current is INamedTypeSymbol { IsFileLocal: true })
+            {
+                return false;
+            }
+
+            switch (current.DeclaredAccessibility)
+            {
+                case Accessibility.Public:
+                    break;
+                case Accessibility.Internal:
+                    if (!SymbolEqualityComparer.Default.Equals(current.ContainingAssembly, compilation.Assembly))
+                    {
+                        return false;
+                    }
+
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string QualifyPredicate(
+        LambdaExpressionSyntax predicate,
+        SemanticModel semanticModel)
+    {
+        return new PredicateQualifier(semanticModel).Visit(predicate)!.ToString();
+    }
+
+    private sealed class PredicateQualifier : CSharpSyntaxRewriter
+    {
+        private readonly SemanticModel _semanticModel;
+
+        internal PredicateQualifier(SemanticModel semanticModel)
+        {
+            _semanticModel = semanticModel;
+        }
+
+        public override SyntaxNode? VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            var method = _semanticModel.GetSymbolInfo(node).Symbol as IMethodSymbol;
+            if (method?.ReducedFrom is not IMethodSymbol extensionMethod
+                || node.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                return base.VisitInvocationExpression(node);
+            }
+
+            var receiver = (ExpressionSyntax)Visit(memberAccess.Expression)!;
+            var receiverArgument = SyntaxFactory.Argument(receiver);
+            if (extensionMethod.Parameters[0].RefKind == RefKind.Ref)
+            {
+                receiverArgument = receiverArgument.WithRefOrOutKeyword(
+                    SyntaxFactory.Token(SyntaxKind.RefKeyword));
+            }
+
+            var arguments = new List<ArgumentSyntax> { receiverArgument };
+            arguments.AddRange(node.ArgumentList.Arguments.Select(argument =>
+                (ArgumentSyntax)Visit(argument)!));
+            var name = (SimpleNameSyntax)Visit(memberAccess.Name)!;
+            var expression = SyntaxFactory.MemberAccessExpression(
+                SyntaxKind.SimpleMemberAccessExpression,
+                SyntaxFactory.ParseExpression(TypeNames.Display(extensionMethod.ContainingType)),
+                name.WithoutTrivia());
+            return SyntaxFactory.InvocationExpression(
+                    expression,
+                    SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(arguments)))
+                .WithTriviaFrom(node);
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            var symbol = _semanticModel.GetSymbolInfo(node).Symbol;
+            if (IsQualifiedNamePart(node))
+            {
+                return base.VisitIdentifierName(node);
+            }
+
+            if (symbol is INamedTypeSymbol type)
+            {
+                return SyntaxFactory.ParseName(TypeNames.Display(type)).WithTriviaFrom(node);
+            }
+
+            var containingType = symbol switch
+            {
+                IFieldSymbol { IsStatic: true } field => field.ContainingType,
+                IPropertySymbol { IsStatic: true } property => property.ContainingType,
+                IMethodSymbol { IsStatic: true } method => method.ContainingType,
+                _ => null,
+            };
+            if (containingType is null)
+            {
+                return base.VisitIdentifierName(node);
+            }
+
+            return SyntaxFactory.ParseExpression(
+                    TypeNames.Display(containingType) + "." + GeneratedNaming.Identifier(symbol!.Name))
+                .WithTriviaFrom(node);
+        }
+
+        public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
+        {
+            if (IsQualifiedNamePart(node))
+            {
+                return base.VisitGenericName(node);
+            }
+
+            var symbol = _semanticModel.GetSymbolInfo(node).Symbol;
+            if (symbol is INamedTypeSymbol type)
+            {
+                return SyntaxFactory.ParseName(TypeNames.Display(type)).WithTriviaFrom(node);
+            }
+
+            if (symbol is IMethodSymbol { IsStatic: true } method)
+            {
+                var visited = (GenericNameSyntax)base.VisitGenericName(node)!;
+                return SyntaxFactory.MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        SyntaxFactory.ParseExpression(TypeNames.Display(method.ContainingType)),
+                        visited.WithoutTrivia())
+                    .WithTriviaFrom(node);
+            }
+
+            return base.VisitGenericName(node);
+        }
+
+        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            return _semanticModel.GetSymbolInfo(node).Symbol is INamedTypeSymbol type
+                ? SyntaxFactory.ParseExpression(TypeNames.Display(type)).WithTriviaFrom(node)
+                : base.VisitMemberAccessExpression(node);
+        }
+
+        public override SyntaxNode? VisitQualifiedName(QualifiedNameSyntax node)
+        {
+            return _semanticModel.GetSymbolInfo(node).Symbol is INamedTypeSymbol type
+                ? SyntaxFactory.ParseName(TypeNames.Display(type)).WithTriviaFrom(node)
+                : base.VisitQualifiedName(node);
+        }
+
+        public override SyntaxNode? VisitAliasQualifiedName(AliasQualifiedNameSyntax node)
+        {
+            return _semanticModel.GetSymbolInfo(node).Symbol is INamedTypeSymbol type
+                ? SyntaxFactory.ParseName(TypeNames.Display(type)).WithTriviaFrom(node)
+                : base.VisitAliasQualifiedName(node);
+        }
+
+        private static bool IsQualifiedNamePart(SimpleNameSyntax node) => node.Parent switch
+        {
+            MemberAccessExpressionSyntax memberAccess => ReferenceEquals(memberAccess.Name, node),
+            QualifiedNameSyntax qualified => ReferenceEquals(qualified.Right, node),
+            AliasQualifiedNameSyntax aliasQualified => ReferenceEquals(aliasQualified.Name, node),
+            _ => false,
+        };
     }
 
     private static bool TryGetRuleKind(string name, out SchemaRuleKind kind)

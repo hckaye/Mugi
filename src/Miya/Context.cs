@@ -9,7 +9,7 @@ using Miya.Json;
 
 namespace Miya;
 
-public class Context
+public partial class Context
 {
     private static readonly AppOptions DefaultOptions = new();
     private static readonly AsyncLocal<RequestLease?> CurrentLease = new();
@@ -17,7 +17,6 @@ public class Context
 
     private readonly HeaderDictionary _headers = new();
     private readonly PooledByteBufferWriter _buffer = new();
-    private readonly CountingBufferWriter _measurementWriter;
     private readonly Request _request;
     private readonly ResponseBufferWriter _responseWriter;
     private IFeatureCollection? _features;
@@ -39,7 +38,6 @@ public class Context
     {
         _request = new Request(this);
         _responseWriter = new ResponseBufferWriter(this);
-        _measurementWriter = new CountingBufferWriter();
     }
 
     public Request Req
@@ -56,7 +54,11 @@ public class Context
         get
         {
             EnsureActive();
-            return _responseState is ResponseState.Streaming or ResponseState.Sent or ResponseState.Aborted
+            return _responseState is ResponseState.Streaming
+                or ResponseState.Sent
+                or ResponseState.Aborted
+                or ResponseState.WebSocketUpgraded
+                or ResponseState.WebSocketAborted
                 || (_responseFeature?.HasStarted ?? false);
         }
     }
@@ -66,7 +68,9 @@ public class Context
         get
         {
             EnsureActive();
-            return _lifetimeFeature?.RequestAborted ?? CancellationToken.None;
+            return _timeoutCancellation?.Token
+                ?? _lifetimeFeature?.RequestAborted
+                ?? CancellationToken.None;
         }
     }
 
@@ -88,7 +92,7 @@ public class Context
         }
     }
 
-    internal bool IsAborted => _responseState == ResponseState.Aborted;
+    internal bool IsAborted => _responseState is ResponseState.Aborted or ResponseState.WebSocketAborted;
 
     public string Param(string name)
     {
@@ -191,25 +195,8 @@ public class Context
     {
         EnsureBodyMutable();
         var codec = global::Miya.Json.Json.GetCodec<T>();
-        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
-        long measuredLength;
-        try
-        {
-            global::Miya.Json.Json.Serialize(_measurementWriter, value, codec, _options.Json);
-            measuredLength = _measurementWriter.WrittenCount;
-        }
-        finally
-        {
-            _measurementWriter.Release();
-        }
-
         BeginBufferedBody("application/json; charset=utf-8");
-        if (SuppressMeasuredBody(measuredLength))
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        global::Miya.Json.Json.Serialize(_responseWriter, value, codec, _options.Json);
+        WriteJsonResponse(value, codec);
         return FinishBodyWrite();
     }
 
@@ -218,27 +205,8 @@ public class Context
         EnsureActive();
         ArgumentNullException.ThrowIfNull(codec);
         EnsureBodyMutable();
-        _measurementWriter.Reset(_options.Json.MaxPooledBufferByteLength);
-        long measuredLength;
-        try
-        {
-            global::Miya.Json.Json.Serialize(_measurementWriter, value, codec, _options.Json);
-            measuredLength = _measurementWriter.WrittenCount;
-        }
-        finally
-        {
-            _measurementWriter.Release();
-        }
-
         BeginBufferedBody("application/json; charset=utf-8");
-        if (SuppressMeasuredBody(measuredLength))
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        var writer = new JsonWriter(_responseWriter, _options.Json);
-        codec.Write(ref writer, value);
-        writer.Flush();
+        WriteJsonResponse(value, codec);
         return FinishBodyWrite();
     }
 
@@ -253,8 +221,16 @@ public class Context
         _buffer.Clear();
         _suppressedBodyLength = 0;
         SetFrameworkHeader("Content-Type", contentType);
-        _responseState = ResponseState.Streaming;
-        ApplyResponseHead(contentLength: null);
+        var timeoutControlled = ClaimStreamingResponse();
+        try
+        {
+            _responseState = ResponseState.Streaming;
+            ApplyResponseHead(contentLength: null);
+        }
+        finally
+        {
+            CompleteStreamingResponseClaim(timeoutControlled);
+        }
 
         try
         {
@@ -310,7 +286,6 @@ public class Context
         }
 
         _options = options ?? DefaultOptions;
-        _options.Validate();
         _generationCounter = unchecked(_generationCounter + 1);
         if (_generationCounter == 0)
         {
@@ -356,10 +331,12 @@ public class Context
         if (retainBuffers)
         {
             _buffer.Reset(maxRetainedBufferBytes);
+            _lengthOnlyJsonWriter?.Reset(maxRetainedBufferBytes);
         }
         else
         {
             _buffer.Dispose();
+            _lengthOnlyJsonWriter?.Dispose();
         }
     }
 
@@ -429,7 +406,10 @@ public class Context
 
     internal async ValueTask CompleteResponse()
     {
-        if (_responseState is ResponseState.Sent or ResponseState.Aborted)
+        if (_responseState is ResponseState.Sent
+            or ResponseState.Aborted
+            or ResponseState.WebSocketUpgraded
+            or ResponseState.WebSocketAborted)
         {
             return;
         }
@@ -480,7 +460,9 @@ public class Context
 
     internal void AbortResponse()
     {
-        _responseState = ResponseState.Aborted;
+        _responseState = _responseState is ResponseState.WebSocketUpgraded or ResponseState.WebSocketAborted
+            ? ResponseState.WebSocketAborted
+            : ResponseState.Aborted;
         _lifetimeFeature?.Abort();
     }
 
@@ -581,7 +563,7 @@ public class Context
         }
 
         var previous = CurrentLease.Value;
-        CurrentLease.Value = new RequestLease(this, _activeGeneration);
+        CurrentLease.Value = new RequestLease(this, _activeGeneration, parent: null);
         return new ExecutionScope(previous);
     }
 
@@ -594,12 +576,7 @@ public class Context
         _responseState = ResponseState.Buffered;
     }
 
-    private ValueTask FinishBodyWrite()
-    {
-        return _responseState == ResponseState.Streaming
-            ? CompleteStreamingResponse()
-            : ValueTask.CompletedTask;
-    }
+    private static ValueTask FinishBodyWrite() => ValueTask.CompletedTask;
 
     private async ValueTask CompleteStreamingResponse()
     {
@@ -628,22 +605,30 @@ public class Context
             return;
         }
 
-        _responseState = ResponseState.Streaming;
-        ApplyResponseHead(contentLength: null);
-        var writtenCount = _buffer.WrittenCount;
-        if (writtenCount > 0)
+        var timeoutControlled = ClaimStreamingResponse();
+        try
         {
-            var writer = ResponseBodyFeature.Writer;
-            var destination = writer.GetSpan(writtenCount);
-            _buffer.WrittenMemory.Span.CopyTo(destination);
-            writer.Advance(writtenCount);
-            _buffer.Clear();
+            _responseState = ResponseState.Streaming;
+            ApplyResponseHead(contentLength: null);
+            var writtenCount = _buffer.WrittenCount;
+            if (writtenCount > 0)
+            {
+                var writer = ResponseBodyFeature.Writer;
+                var destination = writer.GetSpan(writtenCount);
+                _buffer.WrittenMemory.Span.CopyTo(destination);
+                writer.Advance(writtenCount);
+                _buffer.Clear();
+            }
+        }
+        finally
+        {
+            CompleteStreamingResponseClaim(timeoutControlled);
         }
     }
 
     private bool ShouldPromote(int sizeHint)
     {
-        if (_responseState != ResponseState.Buffered || ShouldSuppressBody())
+        if (_responseState != ResponseState.Buffered)
         {
             return false;
         }
@@ -662,6 +647,7 @@ public class Context
             && string.Equals(Req.Method, "HEAD", StringComparison.Ordinal))
         {
             _suppressedBodyLength = bodyLength;
+            return bodyLength > _options.MaxBufferedResponseBytes;
         }
 
         return true;
@@ -709,6 +695,11 @@ public class Context
     private void EnsureHeadersMutable()
     {
         EnsureActive();
+        if (_responseState is ResponseState.WebSocketUpgraded or ResponseState.WebSocketAborted)
+        {
+            throw new InvalidOperationException("response already sent via WebSocket upgrade");
+        }
+
         if (ResponseStarted)
         {
             throw new InvalidOperationException("Status and headers cannot be changed after the response has started.");
@@ -718,6 +709,11 @@ public class Context
     private void EnsureBodyMutable()
     {
         EnsureActive();
+        if (_responseState is ResponseState.WebSocketUpgraded or ResponseState.WebSocketAborted)
+        {
+            throw new InvalidOperationException("response already sent via WebSocket upgrade");
+        }
+
         if (_responseState is ResponseState.Streaming or ResponseState.Sent or ResponseState.Aborted
             || (_responseFeature?.HasStarted ?? false))
         {
@@ -735,6 +731,21 @@ public class Context
     internal void EnsureActive()
     {
         var lease = CurrentLease.Value;
+        if (lease?.Parent is not null)
+        {
+            RequestLease? branch = lease;
+            while (branch is not null)
+            {
+                if (Volatile.Read(ref branch.Surrendered) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The request handler can no longer access the context after a timeout.");
+                }
+
+                branch = branch.Parent;
+            }
+        }
+
         if (_features is null
             || _activeGeneration == 0
             || lease is null
@@ -907,86 +918,29 @@ public class Context
         }
     }
 
-    internal sealed record RequestLease(Context Context, long Generation);
-
-    private sealed class CountingBufferWriter : IBufferWriter<byte>
+    internal sealed class RequestLease
     {
-        private int _maxPooledBufferByteLength;
-        private byte[]? _buffer;
-        private int _available;
-
-        public long WrittenCount { get; private set; }
-
-        public void Reset(int maxPooledBufferByteLength)
+        internal RequestLease(Context context, long generation, RequestLease? parent)
         {
-            _maxPooledBufferByteLength = maxPooledBufferByteLength;
-            WrittenCount = 0;
-            _available = 0;
+            Context = context;
+            Generation = generation;
+            Parent = parent;
         }
 
-        public void Advance(int count)
-        {
-            if (count < 0 || count > _available)
-            {
-                throw new ArgumentOutOfRangeException(nameof(count));
-            }
+        internal Context Context { get; }
 
-            WrittenCount = checked(WrittenCount + count);
-            _available = 0;
-        }
+        internal long Generation { get; }
 
-        public Memory<byte> GetMemory(int sizeHint = 0)
-        {
-            EnsureCapacity(sizeHint);
-            _available = _buffer!.Length;
-            return _buffer;
-        }
+        internal RequestLease? Parent { get; }
 
-        public Span<byte> GetSpan(int sizeHint = 0)
-        {
-            EnsureCapacity(sizeHint);
-            _available = _buffer!.Length;
-            return _buffer;
-        }
-
-        public void Release()
-        {
-            if (_buffer is not null && _buffer.Length <= _maxPooledBufferByteLength)
-            {
-                ArrayPool<byte>.Shared.Return(_buffer);
-            }
-
-            _buffer = null;
-            _available = 0;
-        }
-
-        private void EnsureCapacity(int sizeHint)
-        {
-            if (sizeHint < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sizeHint));
-            }
-
-            var required = Math.Max(sizeHint, 256);
-            if (_buffer is not null && _buffer.Length >= required)
-            {
-                return;
-            }
-
-            var replacement = ArrayPool<byte>.Shared.Rent(required);
-            if (_buffer is not null && _buffer.Length <= _maxPooledBufferByteLength)
-            {
-                ArrayPool<byte>.Shared.Return(_buffer);
-            }
-
-            _buffer = replacement;
-        }
+        internal int Surrendered;
     }
 
     private sealed class ResponseBufferWriter : IBufferWriter<byte>
     {
         private readonly Context _context;
         private bool _lastWriteWasStreaming;
+        private bool _lastWriteWasSuppressed;
 
         public ResponseBufferWriter(Context context)
         {
@@ -1014,6 +968,11 @@ public class Context
             }
 
             var memory = _context._buffer.GetMemory(sizeHint);
+            if (_lastWriteWasSuppressed)
+            {
+                return memory;
+            }
+
             var remaining = _context._options.MaxBufferedResponseBytes - _context._buffer.WrittenCount;
             return memory[..Math.Min(memory.Length, remaining)];
         }
@@ -1027,6 +986,11 @@ public class Context
             }
 
             var span = _context._buffer.GetSpan(sizeHint);
+            if (_lastWriteWasSuppressed)
+            {
+                return span;
+            }
+
             var remaining = _context._options.MaxBufferedResponseBytes - _context._buffer.WrittenCount;
             return span[..Math.Min(span.Length, remaining)];
         }
@@ -1038,7 +1002,9 @@ public class Context
                 throw new ArgumentOutOfRangeException(nameof(sizeHint));
             }
 
-            if (_context.ShouldPromote(sizeHint == 0 ? 1 : sizeHint))
+            _lastWriteWasSuppressed = _context.ShouldSuppressBody();
+            if (!_lastWriteWasSuppressed
+                && _context.ShouldPromote(sizeHint == 0 ? 1 : sizeHint))
             {
                 _context.PromoteToStreaming();
             }
@@ -1061,4 +1027,6 @@ internal enum ResponseState
     Streaming,
     Sent,
     Aborted,
+    WebSocketUpgraded,
+    WebSocketAborted,
 }

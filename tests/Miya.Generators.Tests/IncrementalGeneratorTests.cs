@@ -7,6 +7,61 @@ namespace Miya.Generators.Tests;
 public sealed class IncrementalGeneratorTests
 {
     [Fact]
+    public void Every_recognized_invocation_name_keeps_relevant_generation_enabled()
+    {
+        const string source = """
+            using System.Buffers;
+            using Miya;
+            using Miya.Json;
+            using Miya.Schema;
+
+            internal sealed record Payload(int Id);
+            internal interface IInputPart { int Id { get; } }
+            internal sealed record Input(int Id) : IInputPart;
+            internal static class Routes
+            {
+                internal static void Register()
+                {
+                    var app = new App();
+                    var sub = new App();
+                    var part = Schemas.Part<IInputPart>().Query(input => input.Id);
+                    var schema = Schemas.For<Input>().Use(part);
+                    app.Get("/get/:id", c => c.Json(new Payload(int.Parse(c.Param("id")))));
+                    app.Post("/post", static c => c.Text("post"));
+                    app.Put("/put", static c => c.Text("put"));
+                    app.Delete("/delete", static c => c.Text("delete"));
+                    app.Patch("/patch", static c => c.Text("patch"));
+                    app.Head("/head", static c => c.Text("head"));
+                    app.Options("/options", static c => c.Text("options"));
+                    app.All("/all", static c => c.Text("all"));
+                    app.On("TRACE", "/on", static c => c.Text("on"));
+                    app.Use(static async (c, next) => await next(c));
+                    app.Route("/sub", sub);
+                    app.Get("/schema", schema, static (c, input) => c.Json(input));
+
+                    Json.Include<Payload>();
+                    var buffer = new ArrayBufferWriter<byte>();
+                    Json.Serialize(buffer, new Payload(1));
+                    _ = Json.Deserialize<Payload>(buffer.WrittenSpan);
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var generated = string.Join(
+            Environment.NewLine,
+            run.Result.Results.SelectMany(static result => result.GeneratedSources)
+                .Select(static result => result.SourceText.ToString()));
+
+        Assert.DoesNotContain(
+            run.Compilation.GetDiagnostics(),
+            static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("IJsonCodec<global::Payload>", generated, StringComparison.Ordinal);
+        Assert.Contains("RouteTemplate.Precompiled", generated, StringComparison.Ordinal);
+        Assert.Contains("IInputBinder<global::Input>", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Unrelated_edit_reuses_json_type_pipeline_output()
     {
         const string source = """
@@ -128,6 +183,162 @@ public sealed class IncrementalGeneratorTests
 
         AssertTrackedSourceUnchanged(result, "MiyaRouteSources", "_002F_b");
         AssertTrackedSourceUnchanged(result, "MiyaInterceptorSources", "SecondRoutes");
+    }
+
+    [Fact]
+    public void Editing_a_part_updates_consumers_and_keeps_unrelated_schemas_unchanged()
+    {
+        const string firstPart = """
+            using Miya.Schema;
+            internal interface IPaging { int Page { get; } }
+            internal static class Parts
+            {
+                internal static readonly SchemaPart<IPaging> Paging = Schemas.Part<IPaging>()
+                    .Query(input => input.Page, rules => rules.Default(1));
+            }
+            """;
+        const string changedPart = """
+            using Miya.Schema;
+            internal interface IPaging { int Page { get; } }
+            internal static class Parts
+            {
+                internal static readonly SchemaPart<IPaging> Paging = Schemas.Part<IPaging>()
+                    .Query(input => input.Page, rules => rules.Default(2));
+            }
+            """;
+        const string consumer = """
+            using Miya;
+            using Miya.Schema;
+            internal sealed record ConsumerInput(int Page) : IPaging;
+            internal static class ConsumerRoutes
+            {
+                internal static void Map()
+                {
+                    var app = new App();
+                    var schema = Schemas.For<ConsumerInput>().Use(Parts.Paging);
+                    app.Get("/consumer", schema, static (context, input) => context.Json(input));
+                }
+            }
+            """;
+        const string unrelated = """
+            using Miya;
+            using Miya.Schema;
+            internal sealed record UnrelatedInput(int Value);
+            internal static class UnrelatedRoutes
+            {
+                internal static void Map()
+                {
+                    var app = new App();
+                    var schema = Schemas.For<UnrelatedInput>().Query(input => input.Value);
+                    app.Get("/unrelated", schema, static (context, input) => context.Json(input));
+                }
+            }
+            """;
+        var compilation = GeneratorTestHelper.CreateCompilation(firstPart, "Part.cs")
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    consumer,
+                    GeneratorTestHelper.ParseOptions,
+                    "Consumer.cs"),
+                CSharpSyntaxTree.ParseText(
+                    unrelated,
+                    GeneratorTestHelper.ParseOptions,
+                    "Unrelated.cs"));
+        var first = GeneratorTestHelper.Run(compilation, trackSteps: true);
+        var changedTree = CSharpSyntaxTree.ParseText(
+            changedPart,
+            GeneratorTestHelper.ParseOptions,
+            "Part.cs");
+        var updated = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Single(static tree => tree.FilePath == "Part.cs"),
+            changedTree);
+
+        var driver = first.Driver.RunGeneratorsAndUpdateCompilation(updated, out _, out _);
+        var result = driver.GetRunResult().Results.Single();
+        var consumerOutputs = result.TrackedSteps["MiyaSchemaSources"]
+            .SelectMany(static step => step.Outputs)
+            .Where(output => output.Value is GeneratedSource source
+                && source.HintName.Contains("ConsumerInput", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(consumerOutputs);
+        Assert.All(
+            consumerOutputs,
+            static output => Assert.DoesNotContain(
+                output.Reason,
+                new[] { IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged }));
+        AssertTrackedSourceUnchanged(result, "MiyaSchemaSources", "UnrelatedInput");
+    }
+
+    [Fact]
+    public void Editing_a_shared_rule_method_regenerates_its_consumer()
+    {
+        const string firstRules = """
+            using Miya.Schema;
+            internal static class SharedRules
+            {
+                internal static void Apply(Rule<int> rule) => rule.Range(1, 10);
+            }
+            """;
+        const string changedRules = """
+            using Miya.Schema;
+            internal static class SharedRules
+            {
+                internal static void Apply(Rule<int> rule) => rule.Range(1, 20);
+            }
+            """;
+        const string consumer = """
+            using Miya;
+            using Miya.Schema;
+            internal sealed record ConsumerInput(int Value);
+            internal static class ConsumerRoutes
+            {
+                internal static void Map()
+                {
+                    var app = new App();
+                    var schema = Schemas.For<ConsumerInput>()
+                        .Query(input => input.Value, SharedRules.Apply);
+                    app.Get("/consumer", schema, static (context, input) => context.Json(input));
+                }
+            }
+            """;
+        var compilation = GeneratorTestHelper.CreateCompilation(firstRules, "Rules.cs")
+            .AddSyntaxTrees(CSharpSyntaxTree.ParseText(
+                consumer,
+                GeneratorTestHelper.ParseOptions,
+                "Consumer.cs"));
+        var first = GeneratorTestHelper.Run(compilation, trackSteps: true);
+        var changedTree = CSharpSyntaxTree.ParseText(
+            changedRules,
+            GeneratorTestHelper.ParseOptions,
+            "Rules.cs");
+        var updated = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Single(static tree => tree.FilePath == "Rules.cs"),
+            changedTree);
+
+        var driver = first.Driver.RunGeneratorsAndUpdateCompilation(updated, out _, out _);
+        var result = driver.GetRunResult().Results.Single();
+        var consumerOutputs = result.TrackedSteps["MiyaSchemaSources"]
+            .SelectMany(static step => step.Outputs)
+            .Where(output => output.Value is GeneratedSource source
+                && source.HintName.Contains("ConsumerInput", StringComparison.Ordinal))
+            .ToArray();
+        var generated = string.Join(
+            Environment.NewLine,
+            result.GeneratedSources
+                .Where(static source => source.HintName.StartsWith(
+                    "Miya.SchemaBinder.",
+                    StringComparison.Ordinal))
+                .Select(static source => source.SourceText.ToString()));
+
+        Assert.NotEmpty(consumerOutputs);
+        Assert.All(
+            consumerOutputs,
+            static output => Assert.DoesNotContain(
+                output.Reason,
+                new[] { IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged }));
+        Assert.Contains("must be between 1 and 20", generated, StringComparison.Ordinal);
+        Assert.DoesNotContain("must be between 1 and 10", generated, StringComparison.Ordinal);
     }
 
     [Fact]

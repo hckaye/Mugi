@@ -6,6 +6,79 @@ namespace Miya.Generators.Tests;
 public sealed class OpenApiTests
 {
     [Fact]
+    public void Form_fields_generate_urlencoded_request_body_with_constraints()
+    {
+        const string source = """
+            using Miya;
+            using Miya.Schema;
+
+            internal sealed record FormInput(string Name, int Age, string? Note);
+            internal static class Routes
+            {
+                internal static void Map()
+                {
+                    var app = new App();
+                    var schema = Schemas.For<FormInput>()
+                        .Form(input => input.Name, rules => rules.NotEmpty().MaxLength(40))
+                        .Form(input => input.Age, rules => rules.Range(0, 120))
+                        .Form(input => input.Note, rules => rules.Optional());
+                    app.Post("/form", schema, static (context, input) => context.Json(input));
+                }
+            }
+            """;
+
+        var json = OpenApiDocumentBuilder.Build(
+            GeneratorTestHelper.CreateCompilation(source),
+            new OpenApiSettings("Forms", "1.0.0"));
+
+        using var document = JsonDocument.Parse(json);
+        var schema = document.RootElement.GetProperty("paths").GetProperty("/form")
+            .GetProperty("post").GetProperty("requestBody").GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded").GetProperty("schema");
+        var properties = schema.GetProperty("properties");
+        Assert.Equal(1, properties.GetProperty("Name").GetProperty("minLength").GetInt32());
+        Assert.Equal(40, properties.GetProperty("Name").GetProperty("maxLength").GetInt32());
+        Assert.Equal(0, properties.GetProperty("Age").GetProperty("minimum").GetInt32());
+        Assert.Equal(120, properties.GetProperty("Age").GetProperty("maximum").GetInt32());
+        var required = schema.GetProperty("required").EnumerateArray()
+            .Select(static item => item.GetString())
+            .ToArray();
+        Assert.Contains("Name", required);
+        Assert.Contains("Age", required);
+        Assert.DoesNotContain("Note", required);
+    }
+
+    [Fact]
+    public void Component_required_members_match_json_codec_presence_rules()
+    {
+        const string source = """
+            using Miya;
+
+            internal sealed record PresenceShape(string? Value, int Count = 42);
+            internal static class Routes
+            {
+                internal static void Map()
+                {
+                    var app = new App();
+                    app.Get("/presence", static context => context.Json(new PresenceShape(null)));
+                }
+            }
+            """;
+
+        var json = OpenApiDocumentBuilder.Build(
+            GeneratorTestHelper.CreateCompilation(source),
+            new OpenApiSettings("Presence", "1.0.0"));
+
+        using var document = JsonDocument.Parse(json);
+        var required = document.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("PresenceShape").GetProperty("required").EnumerateArray()
+            .Select(static item => item.GetString())
+            .ToArray();
+        Assert.Contains("value", required);
+        Assert.DoesNotContain("count", required);
+    }
+
+    [Fact]
     public void Representative_routes_generate_openapi_31_document()
     {
         const string source = """

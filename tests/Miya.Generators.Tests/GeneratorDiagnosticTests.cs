@@ -77,6 +77,27 @@ public sealed class GeneratorDiagnosticTests
     }
 
     [Fact]
+    public void Source_record_without_primary_constructor_remains_unsupported()
+    {
+        const string source = """
+            using Miya.Json;
+            internal sealed record Payload
+            {
+                public int Id { get; init; }
+            }
+            internal static class Calls
+            {
+                internal static void Run() => Json.Include<Payload>();
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+
+        var diagnostic = Assert.Single(run.Result.Diagnostics, diagnostic => diagnostic.Id == "MIYA004");
+        Assert.Contains("records must declare a primary constructor", diagnostic.GetMessage(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Reordered_named_route_arguments_are_mapped_to_their_parameters()
     {
         const string source = """

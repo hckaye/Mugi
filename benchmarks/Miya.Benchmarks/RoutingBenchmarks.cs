@@ -10,6 +10,7 @@ namespace Miya.Benchmarks;
 public class RoutingBenchmarks
 {
     private InMemoryRequestHarness _harness = null!;
+    private InMemoryRequestHarness _largeHarness = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -32,15 +33,24 @@ public class RoutingBenchmarks
         });
 
         _harness = new InMemoryRequestHarness(app.Build());
+        _largeHarness = CreateLargeRouteHarness();
         Verify("GET", "/health", 200);
         Verify("GET", "/api/users/42", 200);
         Verify("GET", "/assets/css/site.css", 200);
         Verify("GET", "/missing/path", 404);
         Verify("POST", "/health", 405);
+        Verify(_largeHarness, "GET", "/scale/shared/v1/zone-99/items/value/detail", 200);
+        Verify(_largeHarness, "GET", "/scale/shared/v1/zone-99/assets/css/site.css", 200);
+        Verify(_largeHarness, "GET", "/scale/shared/v1/zone-100/fixed", 404);
+        Verify(_largeHarness, "POST", "/scale/shared/v1/zone-73/fixed", 405);
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _harness.Dispose();
+    public void Cleanup()
+    {
+        _harness.Dispose();
+        _largeHarness.Dispose();
+    }
 
     [BenchmarkCategory("Routing"), Benchmark(Baseline = true)]
     public int StaticHit() => _harness.Invoke("GET", "/health");
@@ -57,11 +67,42 @@ public class RoutingBenchmarks
     [BenchmarkCategory("Routing"), Benchmark]
     public int MethodNotAllowed() => _harness.Invoke("POST", "/health");
 
+    [BenchmarkCategory("Routing"), Benchmark]
+    public int LargeRouteTableParameterHit() =>
+        _largeHarness.Invoke("GET", "/scale/shared/v1/zone-99/items/value/detail");
+
     private static ValueTask Empty(Context context) => ValueTask.CompletedTask;
+
+    private static InMemoryRequestHarness CreateLargeRouteHarness()
+    {
+        var app = new App();
+        for (var index = 0; index < 100; index++)
+        {
+            app.Get($"/scale/shared/v1/zone-{index}/fixed", Empty);
+            app.Get($"/scale/shared/v1/zone-{index}/items/:id/detail", Empty);
+            app.Get($"/scale/shared/v1/zone-{index}/assets/*rest", Empty);
+        }
+
+        app.NotFound(static context =>
+        {
+            context.Status(404);
+            return ValueTask.CompletedTask;
+        });
+        return new InMemoryRequestHarness(app.Build());
+    }
 
     private void Verify(string method, string path, int expectedStatus)
     {
-        var actualStatus = _harness.Invoke(method, path);
+        Verify(_harness, method, path, expectedStatus);
+    }
+
+    private static void Verify(
+        InMemoryRequestHarness harness,
+        string method,
+        string path,
+        int expectedStatus)
+    {
+        var actualStatus = harness.Invoke(method, path);
         if (actualStatus != expectedStatus)
         {
             throw new InvalidOperationException(

@@ -59,14 +59,16 @@ public sealed class JsonIntegrationTests
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
-    public async Task BufferedJsonPromotesToStreamingWithoutResettingConnection()
+    public async Task LargeJsonPromotesToChunkedStreamingAndArrivesIntact()
     {
+        const int valueLength = 2 * 1024 * 1024;
+        var value = new string('x', valueLength);
         var promoted = false;
         var app = new App();
         app.Get("/large", context =>
         {
             var operation = context.Json(
-                new PromotionPayload("123456789"),
+                new PromotionPayload(value),
                 PromotionPayloadCodec.Instance);
             promoted = context.ResponseStarted;
             return operation;
@@ -75,15 +77,28 @@ public sealed class JsonIntegrationTests
         await using var server = await app.StartAsync(new AppOptions
         {
             Port = 0,
-            MaxBufferedResponseBytes = 10,
+            MaxBufferedResponseBytes = 32 * 1024,
             ShutdownTimeout = TimeSpan.FromSeconds(2),
         });
         using var client = CreateClient(server);
-        using var response = await client.GetAsync("/large");
+        using var response = await client.GetAsync("/large", HttpCompletionOption.ResponseHeadersRead);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(promoted);
-        Assert.Equal("{\"value\":\"123456789\"}", await response.Content.ReadAsStringAsync());
+        Assert.True(response.Headers.TransferEncodingChunked);
+        Assert.Null(response.Content.Headers.ContentLength);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal(valueLength + 12, body.Length);
+        Assert.StartsWith("{\"value\":\"", body, StringComparison.Ordinal);
+        Assert.EndsWith("\"}", body, StringComparison.Ordinal);
+        Assert.True(body.AsSpan(10, valueLength).SequenceEqual(value));
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task PostThenLargeJsonPreservesPromotionObservationAndChunkedTransfer()
+    {
+        await PostReadsAndReturnsJsonBody();
+        await LargeJsonPromotesToChunkedStreamingAndArrivesIntact();
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]

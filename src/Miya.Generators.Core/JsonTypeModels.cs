@@ -61,15 +61,25 @@ internal sealed class JsonTypeModel
 
 internal sealed class JsonPropertyModel
 {
-    internal JsonPropertyModel(IPropertySymbol property, bool isPrimary)
+    internal JsonPropertyModel(
+        IPropertySymbol property,
+        bool isPrimary,
+        IParameterSymbol? primaryParameter = null)
     {
         Property = property;
         IsPrimary = isPrimary;
+        PrimaryParameter = primaryParameter;
     }
 
     internal IPropertySymbol Property { get; }
 
     internal bool IsPrimary { get; }
+
+    internal IParameterSymbol? PrimaryParameter { get; }
+
+    internal bool RequiresPresence =>
+        Property.IsRequired
+        || (PrimaryParameter is not null && !PrimaryParameter.HasExplicitDefaultValue);
 }
 
 internal sealed class JsonTypeGraph
@@ -369,30 +379,6 @@ internal static class JsonTypeGraphBuilder
             return false;
         }
 
-        var primaryNames = new List<string>();
-        if (type.IsRecord)
-        {
-            var recordSyntax = type.DeclaringSyntaxReferences
-                .Select(static reference => reference.GetSyntax())
-                .OfType<RecordDeclarationSyntax>()
-                .FirstOrDefault(static syntax => syntax.ParameterList is not null);
-            if (recordSyntax is null)
-            {
-                error = "records must declare a primary constructor";
-                return false;
-            }
-
-            foreach (var parameter in recordSyntax.ParameterList!.Parameters)
-            {
-                primaryNames.Add(parameter.Identifier.ValueText);
-            }
-        }
-        else if (type.TypeKind == TypeKind.Class && !HasAccessibleParameterlessConstructor(type))
-        {
-            error = "POCO classes must have a public or internal parameterless constructor";
-            return false;
-        }
-
         var candidates = type.GetMembers()
             .OfType<IPropertySymbol>()
             .Where(static property => !property.IsStatic && !property.IsIndexer)
@@ -401,17 +387,64 @@ internal static class JsonTypeGraphBuilder
             .ThenBy(static property => property.Name, StringComparer.Ordinal)
             .ToList();
 
-        var primaryBuilder = ImmutableArray.CreateBuilder<JsonPropertyModel>();
-        foreach (var primaryName in primaryNames)
+        var primaryParameters = ImmutableArray<IParameterSymbol>.Empty;
+        if (type.IsRecord)
         {
-            var property = candidates.FirstOrDefault(candidate => candidate.Name == primaryName);
-            if (property is null || property.GetMethod is null || !IsAccessibleMember(property.GetMethod.DeclaredAccessibility))
+            var recordDeclarations = type.DeclaringSyntaxReferences
+                .Select(static reference => reference.GetSyntax())
+                .OfType<RecordDeclarationSyntax>()
+                .ToList();
+            var recordSyntax = recordDeclarations
+                .FirstOrDefault(static syntax => syntax.ParameterList is not null);
+            IMethodSymbol? primaryConstructor;
+            if (recordSyntax is not null)
             {
-                error = "primary constructor parameter '" + primaryName + "' has no accessible property";
+                var primaryNames = recordSyntax.ParameterList!.Parameters
+                    .Select(static parameter => parameter.Identifier.ValueText)
+                    .ToImmutableArray();
+                primaryConstructor = FindSourceRecordConstructor(type, candidates, primaryNames);
+            }
+            else if (recordDeclarations.Count == 0)
+            {
+                primaryConstructor = FindMetadataRecordConstructor(type, candidates, out var ambiguous);
+                if (ambiguous)
+                {
+                    error = "metadata record primary constructor is ambiguous";
+                    return false;
+                }
+            }
+            else
+            {
+                primaryConstructor = null;
+            }
+
+            if (primaryConstructor is null)
+            {
+                error = "records must declare a primary constructor";
                 return false;
             }
 
-            primaryBuilder.Add(new JsonPropertyModel(property, true));
+            primaryParameters = primaryConstructor.Parameters;
+        }
+        else if (type.TypeKind == TypeKind.Class && !HasAccessibleParameterlessConstructor(type))
+        {
+            error = "POCO classes must have a public or internal parameterless constructor";
+            return false;
+        }
+
+        var primaryBuilder = ImmutableArray.CreateBuilder<JsonPropertyModel>();
+        foreach (var parameter in primaryParameters)
+        {
+            var property = candidates.FirstOrDefault(candidate =>
+                candidate.Name == parameter.Name
+                && SymbolEqualityComparer.Default.Equals(candidate.Type, parameter.Type));
+            if (property is null || property.GetMethod is null || !IsAccessibleMember(property.GetMethod.DeclaredAccessibility))
+            {
+                error = "primary constructor parameter '" + parameter.Name + "' has no accessible property";
+                return false;
+            }
+
+            primaryBuilder.Add(new JsonPropertyModel(property, true, parameter));
         }
 
         var propertyBuilder = ImmutableArray.CreateBuilder<JsonPropertyModel>();
@@ -422,7 +455,7 @@ internal static class JsonTypeGraphBuilder
 
         foreach (var property in candidates)
         {
-            if (primaryNames.Contains(property.Name))
+            if (primaryParameters.Any(parameter => parameter.Name == property.Name))
             {
                 continue;
             }
@@ -441,6 +474,150 @@ internal static class JsonTypeGraphBuilder
         primaryProperties = primaryBuilder.ToImmutable();
         return true;
     }
+
+    private static IMethodSymbol? FindSourceRecordConstructor(
+        INamedTypeSymbol type,
+        IReadOnlyList<IPropertySymbol> properties,
+        ImmutableArray<string> primaryNames)
+    {
+        foreach (var constructor in type.InstanceConstructors)
+        {
+            if (!IsAccessibleMember(constructor.DeclaredAccessibility)
+                || constructor.Parameters.Length != primaryNames.Length
+                || IsRecordCopyConstructor(type, constructor)
+                || !ParametersMatchProperties(constructor.Parameters, properties))
+            {
+                continue;
+            }
+
+            var matches = true;
+            for (var index = 0; index < primaryNames.Length; index++)
+            {
+                if (!string.Equals(constructor.Parameters[index].Name, primaryNames[index], StringComparison.Ordinal))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                return constructor;
+            }
+        }
+
+        return null;
+    }
+
+    private static IMethodSymbol? FindMetadataRecordConstructor(
+        INamedTypeSymbol type,
+        IReadOnlyList<IPropertySymbol> properties,
+        out bool ambiguous)
+    {
+        ambiguous = false;
+        var positionalShapes = type.GetMembers("Deconstruct")
+            .OfType<IMethodSymbol>()
+            .Where(static method =>
+                !method.IsStatic
+                && method.ReturnsVoid
+                && method.Parameters.All(static parameter => parameter.RefKind == RefKind.Out))
+            .ToList();
+        var matches = new List<IMethodSymbol>();
+        foreach (var constructor in type.InstanceConstructors)
+        {
+            if (constructor.DeclaredAccessibility != Accessibility.Public
+                || IsRecordCopyConstructor(type, constructor)
+                || !ParametersMatchPropertiesOneToOne(constructor.Parameters, properties)
+                || !positionalShapes.Any(shape => ParametersMatchPositionalShape(
+                    constructor.Parameters,
+                    shape.Parameters)))
+            {
+                continue;
+            }
+
+            matches.Add(constructor);
+        }
+
+        ambiguous = matches.Count > 1;
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private static bool ParametersMatchPropertiesOneToOne(
+        ImmutableArray<IParameterSymbol> parameters,
+        IReadOnlyList<IPropertySymbol> properties)
+    {
+        var matchedProperties = new HashSet<IPropertySymbol>(SymbolEqualityComparer.Default);
+        foreach (var parameter in parameters)
+        {
+            var property = properties.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, parameter.Name, StringComparison.Ordinal)
+                && SymbolEqualityComparer.Default.Equals(candidate.Type, parameter.Type)
+                && candidate.GetMethod is not null
+                && candidate.SetMethod?.IsInitOnly == true);
+            if (property is null || !matchedProperties.Add(property))
+            {
+                return false;
+            }
+        }
+
+        return matchedProperties.Count == parameters.Length;
+    }
+
+    private static bool ParametersMatchPositionalShape(
+        ImmutableArray<IParameterSymbol> constructorParameters,
+        ImmutableArray<IParameterSymbol> deconstructParameters)
+    {
+        if (constructorParameters.Length != deconstructParameters.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < constructorParameters.Length; index++)
+        {
+            if (!string.Equals(
+                    constructorParameters[index].Name,
+                    deconstructParameters[index].Name,
+                    StringComparison.Ordinal)
+                || !SymbolEqualityComparer.Default.Equals(
+                    constructorParameters[index].Type,
+                    deconstructParameters[index].Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ParametersMatchProperties(
+        ImmutableArray<IParameterSymbol> parameters,
+        IReadOnlyList<IPropertySymbol> properties)
+    {
+        foreach (var parameter in parameters)
+        {
+            var matched = false;
+            foreach (var property in properties)
+            {
+                if (string.Equals(property.Name, parameter.Name, StringComparison.Ordinal)
+                    && SymbolEqualityComparer.Default.Equals(property.Type, parameter.Type))
+                {
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsRecordCopyConstructor(INamedTypeSymbol type, IMethodSymbol constructor) =>
+        constructor.Parameters.Length == 1
+        && SymbolEqualityComparer.Default.Equals(constructor.Parameters[0].Type, type);
 
     private static bool ContainsTypeParameter(ITypeSymbol type)
     {

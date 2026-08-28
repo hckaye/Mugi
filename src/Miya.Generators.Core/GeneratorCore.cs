@@ -64,10 +64,7 @@ public static class GeneratorCore
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         foreach (var analysis in analyses)
         {
-            if (analysis.Diagnostic is not null)
-            {
-                diagnostics.Add(analysis.Diagnostic);
-            }
+            diagnostics.AddRange(analysis.Diagnostics);
         }
 
         AddDuplicateRouteDiagnostics(analyses, diagnostics);
@@ -212,10 +209,7 @@ public static class GeneratorCore
         GeneratorSettings settings)
     {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        if (analysis.Diagnostic is not null)
-        {
-            diagnostics.Add(analysis.Diagnostic);
-        }
+        diagnostics.AddRange(analysis.Diagnostics);
 
         if (analysis.JsonType is not null || analysis.SchemaDefinition is not null)
         {

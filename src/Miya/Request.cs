@@ -8,7 +8,7 @@ using Miya.Json;
 
 namespace Miya;
 
-public sealed class Request
+public sealed partial class Request
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -77,6 +77,7 @@ public sealed class Request
     internal void Reset()
     {
         _query = null;
+        _cookies = null;
         Volatile.Write(ref _bodyClaimed, 0);
     }
 

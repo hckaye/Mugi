@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 
 namespace Miya.Generators.Core;
@@ -20,53 +18,51 @@ internal sealed class JsonSourceEmitter
     internal string EmitCodecs()
     {
         var writer = StartFile();
-        foreach (var model in _models)
-        {
-            EmitCodec(writer, model);
-            writer.Line();
-        }
-
+        var models = AdaptModels();
+        new JsonCodecSourceEmitter(models).EmitCodecs(writer);
         return writer.ToString();
     }
 
     internal string EmitCodecAndRegistrationSource(JsonTypeModel model)
     {
         var writer = StartFile();
-        EmitCodec(writer, model);
+        var models = AdaptModels();
+        var adaptedModel = FindModel(model, models);
+        var emitter = new JsonCodecSourceEmitter(models);
+        emitter.EmitCodec(writer, adaptedModel);
         writer.Line();
-        EmitRegistration(writer, model);
+        emitter.EmitSingleRegistration(
+            writer,
+            adaptedModel,
+            "JsonGeneratedRegistration_" + adaptedModel.CodecName);
         return writer.ToString();
     }
 
     internal string EmitRegistration()
     {
         var writer = StartFile();
-        writer.Open("internal static class JsonGeneratedRegistration");
-        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
-        writer.Open("internal static void Initialize()");
-        foreach (var model in _models)
-        {
-            writer.Line(
-                "global::Miya.Json.Json.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
-                TypeNames.CodecName(model.Type) + ".Instance);");
-        }
-
-        writer.Close();
-        writer.Close();
+        var models = AdaptModels();
+        new JsonCodecSourceEmitter(models).EmitRegistration(writer, "JsonGeneratedRegistration");
         return writer.ToString();
     }
 
-    private static void EmitRegistration(CodeWriter writer, JsonTypeModel model)
+    private ImmutableArray<IJsonCodecModel> AdaptModels() =>
+        RoslynJsonCodecModelAdapter.Create(_models, _settings);
+
+    private static IJsonCodecModel FindModel(
+        JsonTypeModel model,
+        ImmutableArray<IJsonCodecModel> adaptedModels)
     {
-        var codecName = TypeNames.CodecName(model.Type);
-        writer.Open("internal static class JsonGeneratedRegistration_" + codecName);
-        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
-        writer.Open("internal static void Initialize()");
-        writer.Line(
-            "global::Miya.Json.Json.Register<" + TypeNames.NonNullableDisplay(model.Type) + ">(" +
-            codecName + ".Instance);");
-        writer.Close();
-        writer.Close();
+        for (var index = 0; index < adaptedModels.Length; index++)
+        {
+            if (adaptedModels[index] is RoslynJsonCodecModelAdapter adapted
+                && SymbolEqualityComparer.Default.Equals(model.Type, adapted.Symbol))
+            {
+                return adapted;
+            }
+        }
+
+        throw new InvalidOperationException("The JSON codec model was not adapted.");
     }
 
     private static CodeWriter StartFile()
@@ -78,465 +74,5 @@ internal sealed class JsonSourceEmitter
         writer.Line("namespace Miya.Generated;");
         writer.Line();
         return writer;
-    }
-
-    private void EmitCodec(CodeWriter writer, JsonTypeModel model)
-    {
-        var codecName = TypeNames.CodecName(model.Type);
-        var typeName = TypeNames.NonNullableDisplay(model.Type);
-        var valueTypeName = NullableContractType(model.Type);
-        writer.Open(
-            "internal sealed class " + codecName +
-            " : global::Miya.Json.IJsonCodec<" + typeName + ">");
-        writer.Line("internal static readonly " + codecName + " Instance = new " + codecName + "();");
-        writer.Line();
-        writer.Line(
-            "public void Write(ref global::Miya.Json.JsonWriter writer, " + valueTypeName +
-            " value) => WriteValue(ref writer, value);");
-        writer.Line(
-            "public " + valueTypeName +
-            " Read(ref global::Miya.Json.JsonReader reader) => ReadValue(ref reader, 0);");
-        writer.Line();
-        writer.Open(
-            "internal static void WriteValue(ref global::Miya.Json.JsonWriter writer, " +
-            valueTypeName + " value)");
-        EmitWriteBody(writer, model);
-        writer.Close();
-        writer.Line();
-        writer.Open(
-            "internal static " + valueTypeName +
-            " ReadValue(ref global::Miya.Json.JsonReader reader, int depth)");
-        EmitReadBody(writer, model);
-        writer.Close();
-
-        writer.Close();
-    }
-
-    private void EmitWriteBody(CodeWriter writer, JsonTypeModel model)
-    {
-        switch (model.Kind)
-        {
-            case JsonTypeKind.Boolean:
-                writer.Line("writer.WriteBool(value);");
-                return;
-            case JsonTypeKind.Byte:
-            case JsonTypeKind.SByte:
-            case JsonTypeKind.Int16:
-            case JsonTypeKind.UInt16:
-                writer.Line("writer.WriteNumber((int)value);");
-                return;
-            case JsonTypeKind.Int32:
-            case JsonTypeKind.UInt32:
-            case JsonTypeKind.Int64:
-            case JsonTypeKind.UInt64:
-            case JsonTypeKind.Single:
-            case JsonTypeKind.Double:
-            case JsonTypeKind.Decimal:
-                writer.Line("writer.WriteNumber(value);");
-                return;
-            case JsonTypeKind.Char:
-                writer.Line("writer.WriteString(value.ToString());");
-                return;
-            case JsonTypeKind.String:
-                writer.Line("writer.WriteString(value);");
-                return;
-            case JsonTypeKind.Guid:
-                writer.Line("writer.WriteGuid(value);");
-                return;
-            case JsonTypeKind.DateTime:
-                writer.Line("writer.WriteDateTime(value);");
-                return;
-            case JsonTypeKind.DateTimeOffset:
-                writer.Line("writer.WriteDateTimeOffset(value);");
-                return;
-            case JsonTypeKind.Enum:
-                writer.Line(WriteCall(model.EnumUnderlyingType!, "(" + TypeNames.Display(model.EnumUnderlyingType!) + ")value"));
-                return;
-            case JsonTypeKind.Nullable:
-                writer.Open("if (!value.HasValue)");
-                writer.Line("writer.WriteNull();");
-                writer.Line("return;");
-                writer.Close();
-                writer.Line(WriteCall(model.ElementType!, "value.Value"));
-                return;
-            case JsonTypeKind.Array:
-            case JsonTypeKind.List:
-                EmitWriteSequence(writer, model);
-                return;
-            case JsonTypeKind.Dictionary:
-                EmitWriteDictionary(writer, model);
-                return;
-            case JsonTypeKind.Object:
-                EmitWriteObject(writer, model);
-                return;
-            default:
-                throw new InvalidOperationException("Unknown JSON type kind.");
-        }
-    }
-
-    private void EmitWriteSequence(CodeWriter writer, JsonTypeModel model)
-    {
-        EmitNullWrite(writer);
-        writer.Line("writer.EnterContainer(" +
-            (model.Kind == JsonTypeKind.Array ? "value.Length" : "value.Count") + ");");
-        writer.Line("writer.WriteRaw(\"[\"u8);");
-        writer.Line("var index = 0;");
-        writer.Open("foreach (var item in value)");
-        writer.Open("if (index != 0)");
-        writer.Line("writer.WriteRaw(\",\"u8);");
-        writer.Close();
-        writer.Line(WriteCall(model.ElementType!, "item"));
-        writer.Open("if ((++index & 4095) == 0)");
-        writer.Line("writer.ThrowIfCancellationRequested();");
-        writer.Close();
-        writer.Close();
-        writer.Line("writer.WriteRaw(\"]\"u8);");
-        writer.Line("writer.ExitContainer();");
-    }
-
-    private void EmitWriteDictionary(CodeWriter writer, JsonTypeModel model)
-    {
-        EmitNullWrite(writer);
-        writer.Line("writer.EnterContainer(value.Count);");
-        writer.Line("writer.WriteRaw(\"{\"u8);");
-        writer.Line("var index = 0;");
-        writer.Open("foreach (var pair in value)");
-        writer.Open("if (index != 0)");
-        writer.Line("writer.WriteRaw(\",\"u8);");
-        writer.Close();
-        writer.Line("writer.WriteString(pair.Key);");
-        writer.Line("writer.WriteRaw(\":\"u8);");
-        writer.Line(WriteCall(model.DictionaryValueType!, "pair.Value"));
-        writer.Open("if ((++index & 4095) == 0)");
-        writer.Line("writer.ThrowIfCancellationRequested();");
-        writer.Close();
-        writer.Close();
-        writer.Line("writer.WriteRaw(\"}\"u8);");
-        writer.Line("writer.ExitContainer();");
-    }
-
-    private void EmitWriteObject(CodeWriter writer, JsonTypeModel model)
-    {
-        if (model.Type.IsReferenceType)
-        {
-            EmitNullWrite(writer);
-        }
-
-        writer.Line("writer.EnterContainer(" + model.Properties.Length + ");");
-        if (model.Properties.Length == 0)
-        {
-            writer.Line("writer.WriteRaw(\"{}\"u8);");
-            writer.Line("writer.ExitContainer();");
-            return;
-        }
-
-        for (var index = 0; index < model.Properties.Length; index++)
-        {
-            var property = model.Properties[index].Property;
-            var jsonName = GeneratedNaming.JsonPropertyName(property.Name, _settings.Naming);
-            var prefix = GeneratedNaming.JsonMemberPrefix(jsonName, index == 0);
-            writer.Line("writer.WriteRaw(" + GeneratedNaming.Utf8Literal(prefix) + ");");
-            writer.Line(WriteCall(
-                property.Type,
-                "value." + GeneratedNaming.Identifier(property.Name)));
-        }
-
-        writer.Line("writer.WriteRaw(\"}\"u8);");
-        writer.Line("writer.ExitContainer();");
-    }
-
-    private void EmitReadBody(CodeWriter writer, JsonTypeModel model)
-    {
-        switch (model.Kind)
-        {
-            case JsonTypeKind.Boolean:
-                writer.Line("return reader.ReadBool();");
-                return;
-            case JsonTypeKind.Byte:
-                EmitCheckedIntegerRead(writer, "byte", "Byte");
-                return;
-            case JsonTypeKind.SByte:
-                EmitCheckedIntegerRead(writer, "sbyte", "SByte");
-                return;
-            case JsonTypeKind.Int16:
-                EmitCheckedIntegerRead(writer, "short", "Int16");
-                return;
-            case JsonTypeKind.UInt16:
-                EmitCheckedIntegerRead(writer, "ushort", "UInt16");
-                return;
-            case JsonTypeKind.Int32:
-                writer.Line("return reader.ReadInt32();");
-                return;
-            case JsonTypeKind.UInt32:
-                writer.Line("return reader.ReadUInt32();");
-                return;
-            case JsonTypeKind.Int64:
-                writer.Line("return reader.ReadInt64();");
-                return;
-            case JsonTypeKind.UInt64:
-                writer.Line("return reader.ReadUInt64();");
-                return;
-            case JsonTypeKind.Single:
-                writer.Line("return reader.ReadSingle();");
-                return;
-            case JsonTypeKind.Double:
-                writer.Line("return reader.ReadDouble();");
-                return;
-            case JsonTypeKind.Decimal:
-                writer.Line("return reader.ReadDecimal();");
-                return;
-            case JsonTypeKind.Char:
-                writer.Line("var text = reader.ReadString();");
-                writer.Open("if (text is null || text.Length != 1)");
-                writer.Line("throw new global::Miya.Json.JsonException(\"Expected a single JSON character.\", isInputError: true);");
-                writer.Close();
-                writer.Line("return text[0];");
-                return;
-            case JsonTypeKind.String:
-                writer.Line("return reader.ReadString();");
-                return;
-            case JsonTypeKind.Guid:
-                writer.Line("return reader.ReadGuid();");
-                return;
-            case JsonTypeKind.DateTime:
-                writer.Line("return reader.ReadDateTime();");
-                return;
-            case JsonTypeKind.DateTimeOffset:
-                writer.Line("return reader.ReadDateTimeOffset();");
-                return;
-            case JsonTypeKind.Enum:
-                writer.Line("return (" + TypeNames.NonNullableDisplay(model.Type) + ")" + ReadCall(model.EnumUnderlyingType!, "depth") + ";");
-                return;
-            case JsonTypeKind.Nullable:
-                writer.Open("if (reader.TryReadNull())");
-                writer.Line("return null;");
-                writer.Close();
-                writer.Line("return " + ReadCall(model.ElementType!, "depth") + ";");
-                return;
-            case JsonTypeKind.Array:
-            case JsonTypeKind.List:
-                EmitReadSequence(writer, model);
-                return;
-            case JsonTypeKind.Dictionary:
-                EmitReadDictionary(writer, model);
-                return;
-            case JsonTypeKind.Object:
-                EmitReadObject(writer, model);
-                return;
-            default:
-                throw new InvalidOperationException("Unknown JSON type kind.");
-        }
-    }
-
-    private void EmitReadSequence(CodeWriter writer, JsonTypeModel model)
-    {
-        EmitNullRead(writer);
-        var listType = "global::System.Collections.Generic.List<" + TypeNames.Display(model.ElementType!) + ">";
-        writer.Line("var result = new " + listType + "();");
-        writer.Line("reader.ReadBeginArray();");
-        writer.Open("while (!reader.TryReadEndArray())");
-        writer.Line("result.Add(" + ReadCall(model.ElementType!, "depth + 1") + ");");
-        writer.Close();
-        writer.Line(model.Kind == JsonTypeKind.Array ? "return result.ToArray();" : "return result;");
-    }
-
-    private void EmitReadDictionary(CodeWriter writer, JsonTypeModel model)
-    {
-        EmitNullRead(writer);
-        var typeName = TypeNames.NonNullableDisplay(model.Type);
-        writer.Line("var result = new " + typeName + "(global::System.StringComparer.Ordinal);");
-        writer.Line("reader.ReadBeginObject();");
-        writer.Open("while (!reader.TryReadEndObject())");
-        writer.Line("var name = reader.ReadPropertyName();");
-        writer.Line("var key = global::System.Text.Encoding.UTF8.GetString(name);");
-        writer.Line("result[key] = " + ReadCall(model.DictionaryValueType!, "depth + 1") + ";");
-        writer.Close();
-        writer.Line("return result;");
-    }
-
-    private void EmitReadObject(CodeWriter writer, JsonTypeModel model)
-    {
-        if (model.Type.IsReferenceType)
-        {
-            EmitNullRead(writer);
-        }
-
-        for (var index = 0; index < model.Properties.Length; index++)
-        {
-            writer.Line(TypeNames.Display(model.Properties[index].Property.Type) + " property" + index + " = default!;");
-            if (model.Properties[index].Property.IsRequired)
-            {
-                writer.Line("var hasProperty" + index + " = false;");
-            }
-        }
-
-        writer.Line("reader.ReadBeginObject();");
-        writer.Open("while (!reader.TryReadEndObject())");
-        if (model.Properties.Length == 0)
-        {
-            writer.Line("reader.ReadPropertyName();");
-            writer.Line("reader.SkipValue();");
-        }
-        else
-        {
-            writer.Line("var propertyName = reader.ReadPropertyName();");
-            writer.Open("switch (propertyName.Length)");
-            var groups = model.Properties
-                .Select((property, index) => new
-                {
-                    Model = property,
-                    Index = index,
-                    JsonName = GeneratedNaming.JsonPropertyName(property.Property.Name, _settings.Naming),
-                })
-                .GroupBy(static property => System.Text.Encoding.UTF8.GetByteCount(property.JsonName))
-                .OrderBy(static group => group.Key);
-            foreach (var group in groups)
-            {
-                writer.Line("case " + group.Key + ":");
-                var first = true;
-                foreach (var item in group)
-                {
-                    writer.Open((first ? "if" : "else if") + " (global::System.MemoryExtensions.SequenceEqual(propertyName, " + GeneratedNaming.Utf8Literal(item.JsonName) + "))");
-                    var read = ReadCall(item.Model.Property.Type, "depth + 1");
-                    if (item.Model.Property.Type.IsReferenceType
-                        && item.Model.Property.NullableAnnotation == NullableAnnotation.NotAnnotated)
-                    {
-                        read += " ?? throw new global::Miya.Json.JsonException(" +
-                            GeneratedNaming.Literal("Property '" + item.JsonName + "' cannot be null.") +
-                            ", isInputError: true)";
-                    }
-
-                    writer.Line("property" + item.Index + " = " + read + ";");
-                    if (item.Model.Property.IsRequired)
-                    {
-                        writer.Line("hasProperty" + item.Index + " = true;");
-                    }
-
-                    writer.Close();
-                    first = false;
-                }
-
-                writer.Open("else");
-                writer.Line("reader.SkipValue();");
-                writer.Close();
-                writer.Line("break;");
-            }
-
-            writer.Line("default:");
-            writer.Line("    reader.SkipValue();");
-            writer.Line("    break;");
-            writer.Close();
-        }
-
-        writer.Close();
-
-        var required = model.Properties
-            .Select((property, index) => new { property.Property, Index = index })
-            .Where(static item => item.Property.IsRequired)
-            .ToList();
-        if (required.Count != 0)
-        {
-            writer.Open("if (" + string.Join(" || ", required.Select(static item => "!hasProperty" + item.Index)) + ")");
-            writer.Line(
-                "throw new global::Miya.Json.JsonException(" +
-                GeneratedNaming.Literal("One or more required properties are missing for '" + TypeNames.Display(model.Type) + "'.") +
-                ", isInputError: true);");
-            writer.Close();
-        }
-
-        EmitObjectConstruction(writer, model);
-    }
-
-    private static void EmitNullWrite(CodeWriter writer)
-    {
-        writer.Open("if (value is null)");
-        writer.Line("writer.WriteNull();");
-        writer.Line("return;");
-        writer.Close();
-    }
-
-    private static void EmitNullRead(CodeWriter writer)
-    {
-        writer.Open("if (reader.TryReadNull())");
-        writer.Line("return null;");
-        writer.Close();
-    }
-
-    private static void EmitCheckedIntegerRead(CodeWriter writer, string targetType, string typeName)
-    {
-        writer.Open("try");
-        writer.Line("return checked((" + targetType + ")reader.ReadInt32());");
-        writer.Close();
-        writer.Open("catch (global::System.OverflowException exception)");
-        writer.Line(
-            "throw new global::Miya.Json.JsonException(" +
-            GeneratedNaming.Literal("The JSON number is outside the " + typeName + " range.") +
-            ", exception, isInputError: true);");
-        writer.Close();
-    }
-
-    private void EmitObjectConstruction(CodeWriter writer, JsonTypeModel model)
-    {
-        var typeName = TypeNames.NonNullableDisplay(model.Type);
-        var primaryIndexes = new List<int>();
-        for (var primaryIndex = 0; primaryIndex < model.PrimaryProperties.Length; primaryIndex++)
-        {
-            var primary = model.PrimaryProperties[primaryIndex].Property;
-            for (var propertyIndex = 0; propertyIndex < model.Properties.Length; propertyIndex++)
-            {
-                if (SymbolEqualityComparer.Default.Equals(primary, model.Properties[propertyIndex].Property))
-                {
-                    primaryIndexes.Add(propertyIndex);
-                    break;
-                }
-            }
-        }
-
-        var constructor = "new " + typeName + "(" +
-            string.Join(", ", primaryIndexes.Select(static index => "property" + index)) + ")";
-        var remaining = Enumerable.Range(0, model.Properties.Length)
-            .Where(index => !model.Properties[index].IsPrimary)
-            .ToList();
-        if (remaining.Count == 0)
-        {
-            writer.Line("return " + constructor + ";");
-            return;
-        }
-
-        writer.Line("return " + constructor);
-        writer.Line("{");
-        foreach (var index in remaining)
-        {
-            var property = model.Properties[index].Property;
-            writer.Line("    " + GeneratedNaming.Identifier(property.Name) + " = property" + index + ",");
-        }
-
-        writer.Line("};");
-    }
-
-    private string WriteCall(ITypeSymbol type, string value)
-    {
-        return CodecName(type) + ".WriteValue(ref writer, " + value + ");";
-    }
-
-    private string ReadCall(ITypeSymbol type, string depth)
-    {
-        return CodecName(type) + ".ReadValue(ref reader, " + depth + ")";
-    }
-
-    private string CodecName(ITypeSymbol type)
-    {
-        return TypeNames.CodecName(type);
-    }
-
-    private static string NullableContractType(ITypeSymbol type)
-    {
-        var display = TypeNames.NonNullableDisplay(type);
-        if (type.IsReferenceType)
-        {
-            return display + "?";
-        }
-
-        return display;
     }
 }

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,14 @@ public sealed class AppOptions
     private Protocols? _protocols;
 
     public int? Port { get; init; }
+
+    /// <summary>
+    /// Gets the IP address the server binds. When omitted, the <c>HOST</c> environment variable is
+    /// used if it parses as an IP address; otherwise the server binds loopback.
+    /// Containers that accept external traffic set this to <see cref="IPAddress.Any"/>
+    /// (or <c>HOST=0.0.0.0</c>). <see cref="IPAddress.IPv6Any"/> binds dual-stack.
+    /// </summary>
+    public IPAddress? Address { get; init; }
 
     public ILoggerFactory? LoggerFactory { get; init; }
 
@@ -58,6 +67,21 @@ public sealed class AppOptions
     public int MaxRequestBodyBytes { get; init; } = 30 * 1024 * 1024;
 
     public int MaxJsonBodyBytes { get; init; } = 1024 * 1024;
+
+    /// <summary>
+    /// Gets the maximum number of request-body bytes buffered by <see cref="Request.Form"/>.
+    /// </summary>
+    public int MaxFormBodyBytes { get; init; } = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets the maximum number of form fields and the separate maximum number of uploaded files.
+    /// </summary>
+    public int MaxFormFields { get; init; } = 1024;
+
+    /// <summary>
+    /// Gets the maximum number of parts accepted in a multipart request.
+    /// </summary>
+    public int MaxMultipartParts { get; init; } = 1024;
 
     public int MaxRetainedBufferBytes { get; init; } = 64 * 1024;
 
@@ -99,6 +123,9 @@ public sealed class AppOptions
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxBufferedResponseBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxRequestBodyBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxJsonBodyBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxFormBodyBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxFormFields);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxMultipartParts);
         ArgumentOutOfRangeException.ThrowIfNegative(MaxRetainedBufferBytes);
 
         if (ShutdownTimeout <= TimeSpan.Zero)

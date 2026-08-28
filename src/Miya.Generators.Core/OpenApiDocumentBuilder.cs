@@ -339,16 +339,24 @@ public static class OpenApiDocumentBuilder
             var bodyFields = binding.Fields
                 .Where(static field => field.Source == SchemaFieldSource.Body)
                 .ToList();
-            if (bodyFields.Count == 0)
+            var formFields = binding.Fields
+                .Where(static field => field.Source == SchemaFieldSource.Form)
+                .ToList();
+            if (bodyFields.Count == 0 && formFields.Count == 0)
             {
                 return null;
             }
 
+            var fields = bodyFields.Count != 0 ? bodyFields : formFields;
+            var isForm = formFields.Count != 0;
+
             var properties = new ObjectNode();
             var required = new ArrayNode();
-            foreach (var field in bodyFields)
+            foreach (var field in fields)
             {
-                var name = GeneratedNaming.JsonPropertyName(field.Property.Name, _settings.Naming);
+                var name = isForm
+                    ? field.Property.Name
+                    : GeneratedNaming.JsonPropertyName(field.Property.Name, _settings.Naming);
                 var schema = _schemas.Create(field.Property.Type);
                 ApplyRules(schema, field.Rules);
                 properties.Add(name, schema);
@@ -369,7 +377,7 @@ public static class OpenApiDocumentBuilder
             var mediaType = new ObjectNode();
             mediaType.Add("schema", bodySchema);
             var content = new ObjectNode();
-            content.Add("application/json", mediaType);
+            content.Add(isForm ? "application/x-www-form-urlencoded" : "application/json", mediaType);
             var requestBody = new ObjectNode();
             requestBody.Add("required", true);
             requestBody.Add("content", content);
@@ -733,8 +741,7 @@ public static class OpenApiDocumentBuilder
                 properties.Add(
                     GeneratedNaming.JsonPropertyName(property.Property.Name, _naming),
                     Create(property.Property.Type));
-                if (property.Property.IsRequired
-                    || (property.IsPrimary && !IsNullable(property.Property.Type)))
+                if (property.RequiresPresence)
                 {
                     required.Add(GeneratedNaming.JsonPropertyName(property.Property.Name, _naming));
                 }

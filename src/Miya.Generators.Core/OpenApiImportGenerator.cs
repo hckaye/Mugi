@@ -18,6 +18,29 @@ internal static class OpenApiImportGenerator
         OpenApiImportInput input,
         CancellationToken cancellationToken)
     {
+        var result = BuildDocument(input, cancellationToken, OpenApiGenerationMode.Import);
+        if (result.Document is null)
+        {
+            return new GenerationResult(
+                ImmutableArray<GeneratedSource>.Empty,
+                result.Diagnostics);
+        }
+
+        var hintName = GeneratedNaming.StableIdentifier("Miya.OpenApi.", input.Path) + ".g.cs";
+        return new GenerationResult(
+            ImmutableArray.Create(new GeneratedSource(hintName, result.Source!)),
+            result.Diagnostics);
+    }
+
+    internal static OpenApiDocumentBuildResult BuildDocument(
+        OpenApiImportInput input,
+        CancellationToken cancellationToken,
+        OpenApiGenerationMode mode)
+    {
+        if (input is null)
+        {
+            throw new ArgumentNullException(nameof(input));
+        }
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         if (!SimpleJsonParser.TryParse(input.Content, out var value, out var parseError))
         {
@@ -26,9 +49,7 @@ internal static class OpenApiImportGenerator
                 CreateLocation(input, parseError!.Position),
                 input.Path,
                 parseError.Message));
-            return new GenerationResult(
-                ImmutableArray<GeneratedSource>.Empty,
-                diagnostics.ToImmutable());
+            return new OpenApiDocumentBuildResult(null, null, diagnostics.ToImmutable());
         }
 
         if (!(value is SimpleJsonObject root))
@@ -38,25 +59,25 @@ internal static class OpenApiImportGenerator
                 CreateLocation(input, value!.Position),
                 input.Path,
                 "the document root must be an object"));
-            return new GenerationResult(
-                ImmutableArray<GeneratedSource>.Empty,
-                diagnostics.ToImmutable());
+            return new OpenApiDocumentBuildResult(null, null, diagnostics.ToImmutable());
         }
 
-        var builder = new Builder(input, root, diagnostics, cancellationToken);
-        var source = builder.Build();
-        if (source is null)
-        {
-            return new GenerationResult(
-                ImmutableArray<GeneratedSource>.Empty,
-                diagnostics.ToImmutable());
-        }
-
-        var hintName = GeneratedNaming.StableIdentifier("Miya.OpenApi.", input.Path) + ".g.cs";
-        return new GenerationResult(
-            ImmutableArray.Create(new GeneratedSource(hintName, source)),
+        var builder = new Builder(input, root, diagnostics, cancellationToken, mode);
+        var document = builder.BuildModel();
+        return new OpenApiDocumentBuildResult(
+            document,
+            document is null ? null : builder.Emit(),
             diagnostics.ToImmutable());
     }
+
+    internal static string PublicIdentifier(string value, string fallback) =>
+        Builder.PublicIdentifier(value, fallback);
+
+    internal static bool TryExactIdentifier(string value, out string identifier) =>
+        Builder.TryExactIdentifier(value, out identifier);
+
+    internal static bool TryRenderNamespace(string value, out string rendered) =>
+        Builder.TryRenderNamespace(value, out rendered);
 
     private static Location CreateLocation(OpenApiImportInput input, int position)
     {
@@ -96,10 +117,17 @@ internal static class OpenApiImportGenerator
             "minContains", "maxContains", "minProperties", "maxProperties",
         };
 
+        private static readonly string[] GeneratedClientNames =
+        {
+            "_http", "path", "query", "hasQueryParameter", "request", "response",
+            "responseBytes", "responseBody", "bodyBuffer", "cancellationToken",
+        };
+
         private readonly OpenApiImportInput _input;
         private readonly SimpleJsonObject _root;
         private readonly ImmutableArray<Diagnostic>.Builder _diagnostics;
         private readonly CancellationToken _cancellationToken;
+        private readonly OpenApiGenerationMode _mode;
         private readonly Dictionary<string, SimpleJsonObject> _componentSchemas =
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _componentTypeNames =
@@ -111,24 +139,32 @@ internal static class OpenApiImportGenerator
             new(StringComparer.Ordinal);
         private readonly List<OpenApiImportDeclaration> _declarations = new();
         private readonly List<OpenApiImportOperation> _operations = new();
+        private readonly List<OpenApiClientOperation> _clientOperations = new();
         private readonly List<KeyValuePair<string, string>> _paths = new();
         private string _namespace = string.Empty;
+        private string? _title;
+        private string? _clientName;
 
         internal Builder(
             OpenApiImportInput input,
             SimpleJsonObject root,
             ImmutableArray<Diagnostic>.Builder diagnostics,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            OpenApiGenerationMode mode)
         {
             _input = input;
             _root = root;
             _diagnostics = diagnostics;
             _cancellationToken = cancellationToken;
-            _typeOwners.Add("Paths", "generated Paths class");
-            _typeOwners.Add("ApiSchemas", "generated ApiSchemas class");
+            _mode = mode;
+            if (_mode == OpenApiGenerationMode.Import || _input.ServerImport)
+            {
+                _typeOwners.Add("Paths", "generated Paths class");
+                _typeOwners.Add("ApiSchemas", "generated ApiSchemas class");
+            }
         }
 
-        internal string? Build()
+        internal OpenApiImportDocument? BuildModel()
         {
             if (!TryValidateDocument())
             {
@@ -139,7 +175,43 @@ internal static class OpenApiImportGenerator
             BuildComponents();
             BuildPaths();
             FilterInvalidDependencies();
-            return Emit();
+            return new OpenApiImportDocument(
+                _namespace,
+                _title,
+                _declarations,
+                _operations,
+                _paths,
+                _clientOperations,
+                new HashSet<string>(_componentTypeNames.Values, StringComparer.Ordinal),
+                _mode == OpenApiGenerationMode.Client && _input.ServerImport);
+        }
+
+        internal string Emit()
+        {
+            var writer = new CodeWriter();
+            writer.Line("// <auto-generated/>");
+            writer.Line("#nullable enable");
+            writer.Line();
+            writer.Open("namespace " + _namespace);
+
+            foreach (var declaration in _declarations
+                         .OrderBy(static declaration => declaration.Name, StringComparer.Ordinal))
+            {
+                EmitDeclaration(writer, declaration);
+                writer.Line();
+            }
+
+            EmitPaths(writer);
+            writer.Line();
+            foreach (var operation in _operations.OrderBy(static operation => operation.Name, StringComparer.Ordinal))
+            {
+                EmitRecord(writer, operation.InputName, operation.Fields);
+                writer.Line();
+            }
+
+            EmitSchemas(writer);
+            writer.Close();
+            return writer.ToString();
         }
 
         private bool TryValidateDocument()
@@ -161,6 +233,38 @@ internal static class OpenApiImportGenerator
                     _input.TargetNamespace,
                     "the target namespace is not a valid C# namespace");
                 return false;
+            }
+
+            if (TryGetObject(_root, "info", out var info)
+                && TryGetString(info!, "title", out var title, out _)
+                && !string.IsNullOrWhiteSpace(title))
+            {
+                _title = title;
+            }
+
+            if (_mode == OpenApiGenerationMode.Client)
+            {
+                _typeOwners.Add("ApiException", "generated ApiException class");
+                var clientName = _input.ClientName;
+                if (string.IsNullOrWhiteSpace(clientName))
+                {
+                    clientName = PublicIdentifier(_title ?? "OpenApi", "OpenApi") + "Client";
+                }
+
+                if (!TryExactIdentifier(clientName!, out var renderedClientName))
+                {
+                    ReportUnrepresentable(
+                        _root.Position,
+                        clientName!,
+                        "the client class name is not a valid C# identifier");
+                    return false;
+                }
+
+                _clientName = UnescapeIdentifier(renderedClientName);
+                if (!TryReserveType(UnescapeIdentifier(renderedClientName), "generated client class", _root.Position))
+                {
+                    return false;
+                }
             }
 
             if (_root.TryGetValue("paths", out var paths) && !(paths is SimpleJsonObject))
@@ -498,8 +602,10 @@ internal static class OpenApiImportGenerator
             }
 
             var name = PublicIdentifier(rawName, "Operation");
-            if (string.Equals(name, "Paths", StringComparison.Ordinal)
-                || string.Equals(name, "ApiSchemas", StringComparison.Ordinal)
+            if (((_mode == OpenApiGenerationMode.Import || _input.ServerImport)
+                    && (string.Equals(name, "Paths", StringComparison.Ordinal)
+                        || string.Equals(name, "ApiSchemas", StringComparison.Ordinal)))
+                || string.Equals(name, _clientName, StringComparison.Ordinal)
                 || _operationOwners.TryGetValue(name, out _))
             {
                 ReportNameCollision(operation.Position, rawName, name);
@@ -510,7 +616,8 @@ internal static class OpenApiImportGenerator
             _paths.Add(new KeyValuePair<string, string>(name, miyaPath));
 
             var inputName = name + "Input";
-            if (!TryReserveType(inputName, "operation '" + operationLabel + "'", operation.Position))
+            if ((_mode == OpenApiGenerationMode.Import || _input.ServerImport)
+                && !TryReserveType(inputName, "operation '" + operationLabel + "'", operation.Position))
             {
                 return;
             }
@@ -524,6 +631,13 @@ internal static class OpenApiImportGenerator
             var fields = new List<OpenApiImportProperty>();
             var dependencies = new HashSet<string>(StringComparer.Ordinal);
             var propertyNames = new HashSet<string>(StringComparer.Ordinal);
+            if (_mode == OpenApiGenerationMode.Client)
+            {
+                foreach (var generatedName in GeneratedClientNames)
+                {
+                    propertyNames.Add(generatedName);
+                }
+            }
             var boundRouteNames = new HashSet<string>(StringComparer.Ordinal);
             var valid = true;
             foreach (var parameter in parameters)
@@ -569,14 +683,49 @@ internal static class OpenApiImportGenerator
                     inputName,
                     propertyNames,
                     fields,
-                    dependencies))
+                    dependencies,
+                    out var bodyType,
+                    out var bodyRequired))
+            {
+                valid = false;
+            }
+
+            OpenApiImportType? responseType = null;
+            IReadOnlyList<string> jsonResponseStatuses = Array.Empty<string>();
+            IReadOnlyList<string> noBodyResponseStatuses = Array.Empty<string>();
+            if (_mode == OpenApiGenerationMode.Client
+                && !TryBuildResponse(
+                    operation,
+                    operationLabel,
+                    inputName,
+                    dependencies,
+                    out responseType,
+                    out jsonResponseStatuses,
+                    out noBodyResponseStatuses))
             {
                 valid = false;
             }
 
             if (valid)
             {
-                _operations.Add(new OpenApiImportOperation(name, inputName, fields, dependencies));
+                if (_mode == OpenApiGenerationMode.Client)
+                {
+                    _clientOperations.Add(new OpenApiClientOperation(
+                        name,
+                        method,
+                        miyaPath,
+                        fields,
+                        bodyType,
+                        bodyRequired,
+                        responseType,
+                        jsonResponseStatuses,
+                        noBodyResponseStatuses,
+                        dependencies));
+                }
+                else
+                {
+                    _operations.Add(new OpenApiImportOperation(name, inputName, fields, dependencies));
+                }
             }
         }
 
@@ -646,7 +795,7 @@ internal static class OpenApiImportGenerator
                         sourceValue!.Position,
                         operationLabel + " parameter '" + name + "'",
                         "cookie parameters have no Miya.Schema source");
-                    return true;
+                    return _mode != OpenApiGenerationMode.Client;
                 default:
                     ReportInvalid(
                         sourceValue!.Position,
@@ -693,6 +842,15 @@ internal static class OpenApiImportGenerator
                 return false;
             }
 
+            if (_mode == OpenApiGenerationMode.Client && required && type!.Nullable)
+            {
+                ReportUnrepresentable(
+                    schema!.Position,
+                    operationLabel + " parameter '" + name + "'",
+                    "required scalar parameters cannot use a nullable schema");
+                return false;
+            }
+
             var rules = BuildRules(
                 EffectiveSchema(schema!),
                 type!,
@@ -715,8 +873,12 @@ internal static class OpenApiImportGenerator
             string inputName,
             HashSet<string> propertyNames,
             List<OpenApiImportProperty> fields,
-            HashSet<string> dependencies)
+            HashSet<string> dependencies,
+            out OpenApiImportType? bodyType,
+            out bool bodyRequired)
         {
+            bodyType = null;
+            bodyRequired = false;
             if (!operation.TryGetValue("requestBody", out var requestBodyValue))
             {
                 return true;
@@ -769,7 +931,7 @@ internal static class OpenApiImportGenerator
                     content.Position,
                     operationLabel + " requestBody",
                     "only application/json request bodies can be mapped to Miya.Schema");
-                return true;
+                return _mode != OpenApiGenerationMode.Client;
             }
 
             if (!TryGetObject(mediaType, "schema", out var bodySchema))
@@ -787,6 +949,32 @@ internal static class OpenApiImportGenerator
                 return false;
             }
 
+            bodyRequired = GetBoolean(requestBody, "required", defaultValue: false);
+            if (_mode == OpenApiGenerationMode.Client)
+            {
+                if (!TryResolveType(
+                        bodySchema!,
+                        operationLabel + " requestBody",
+                        ClientOperationTypePrefix(inputName) + "Body",
+                        allowInlineObject: true,
+                        out bodyType))
+                {
+                    return false;
+                }
+
+                if (bodyType!.Kind != OpenApiImportTypeKind.Object)
+                {
+                    ReportUnrepresentable(
+                        effectiveBody.Position,
+                        operationLabel + " requestBody",
+                        "request bodies must be JSON objects");
+                    return false;
+                }
+
+                AddDependencies(bodyType, dependencies);
+                return true;
+            }
+
             if (effectiveBody.TryGetValue("additionalProperties", out var additionalProperties))
             {
                 ReportUnsupportedSchema(
@@ -796,8 +984,8 @@ internal static class OpenApiImportGenerator
                 return false;
             }
 
-            if (TryGetSchemaType(effectiveBody, out var bodyType, out _)
-                && !string.Equals(bodyType, "object", StringComparison.Ordinal))
+            if (TryGetSchemaType(effectiveBody, out var bodySchemaType, out _)
+                && !string.Equals(bodySchemaType, "object", StringComparison.Ordinal))
             {
                 ReportUnrepresentable(
                     effectiveBody.Position,
@@ -816,7 +1004,6 @@ internal static class OpenApiImportGenerator
                 return true;
             }
 
-            var bodyRequired = GetBoolean(requestBody, "required", defaultValue: false);
             foreach (var property in bodyProperties!.Properties)
             {
                 if (!(property.Value is SimpleJsonObject propertySchema))
@@ -874,6 +1061,282 @@ internal static class OpenApiImportGenerator
 
             return true;
         }
+
+        private bool TryBuildResponse(
+            SimpleJsonObject operation,
+            string operationLabel,
+            string inputName,
+            HashSet<string> dependencies,
+            out OpenApiImportType? responseType,
+            out IReadOnlyList<string> jsonResponseStatuses,
+            out IReadOnlyList<string> noBodyResponseStatuses)
+        {
+            responseType = null;
+            jsonResponseStatuses = Array.Empty<string>();
+            noBodyResponseStatuses = Array.Empty<string>();
+            if (!TryGetObject(operation, "responses", out var responses))
+            {
+                if (operation.TryGetValue("responses", out var invalidResponses))
+                {
+                    ReportInvalid(invalidResponses.Position, operationLabel + " responses must be an object");
+                    return false;
+                }
+
+                return true;
+            }
+
+            var jsonResponses = new List<KeyValuePair<string, SimpleJsonObject>>();
+            var noBodyStatuses = new List<string>();
+            var hasNonJsonSuccessBody = false;
+            foreach (var responseProperty in responses!.Properties)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                if (!IsSuccessStatusCode(responseProperty.Name))
+                {
+                    continue;
+                }
+
+                if (!(responseProperty.Value is SimpleJsonObject response))
+                {
+                    ReportInvalid(
+                        responseProperty.Value.Position,
+                        operationLabel + " response '" + responseProperty.Name + "' must be an object");
+                    return false;
+                }
+
+                if (response.TryGetValue("$ref", out var responseReference))
+                {
+                    ReportUnrepresentable(
+                        responseReference.Position,
+                        operationLabel + " response '" + responseProperty.Name + "'",
+                        "referenced response objects are not supported");
+                    return false;
+                }
+
+                if (!TryGetObject(response, "content", out var content))
+                {
+                    if (response.TryGetValue("content", out var invalidContent))
+                    {
+                        ReportInvalid(
+                            invalidContent.Position,
+                            operationLabel + " response '" + responseProperty.Name + "'.content must be an object");
+                        return false;
+                    }
+
+                    noBodyStatuses.Add(responseProperty.Name);
+                    continue;
+                }
+
+                SimpleJsonObject? jsonMediaType = null;
+                foreach (var contentProperty in content!.Properties)
+                {
+                    if (!IsJsonMediaType(contentProperty.Name))
+                    {
+                        continue;
+                    }
+
+                    jsonMediaType = contentProperty.Value as SimpleJsonObject;
+                    if (jsonMediaType is null)
+                    {
+                        ReportInvalid(
+                            contentProperty.Value.Position,
+                            operationLabel + " response JSON media type must be an object");
+                        return false;
+                    }
+
+                    break;
+                }
+
+                if (jsonMediaType is null)
+                {
+                    if (content.Properties.Count != 0)
+                    {
+                        hasNonJsonSuccessBody = true;
+                    }
+                    else
+                    {
+                        noBodyStatuses.Add(responseProperty.Name);
+                    }
+
+                    continue;
+                }
+
+                if (!TryGetObject(jsonMediaType, "schema", out var responseSchema))
+                {
+                    ReportUnrepresentable(
+                        jsonMediaType.Position,
+                        operationLabel + " response '" + responseProperty.Name + "'",
+                        "the JSON media type must declare a schema object");
+                    return false;
+                }
+
+                jsonResponses.Add(new KeyValuePair<string, SimpleJsonObject>(
+                    responseProperty.Name,
+                    responseSchema!));
+            }
+
+            if (hasNonJsonSuccessBody)
+            {
+                ReportUnrepresentable(
+                    responses.Position,
+                    operationLabel + " responses",
+                    "only JSON success response bodies are supported by the generated client");
+                return false;
+            }
+
+            noBodyResponseStatuses = noBodyStatuses;
+            if (jsonResponses.Count == 0)
+            {
+                return true;
+            }
+
+            var selectedResponse = jsonResponses
+                .OrderBy(static response => ResponseStatusPriority(response.Key))
+                .First();
+            foreach (var candidate in jsonResponses)
+            {
+                if (!ResponseSchemasMatch(selectedResponse.Value, candidate.Value))
+                {
+                    ReportUnrepresentable(
+                        candidate.Value.Position,
+                        operationLabel + " responses",
+                        "success statuses declare incompatible JSON schemas");
+                    return false;
+                }
+            }
+
+            if (!TryResolveType(
+                    selectedResponse.Value,
+                    operationLabel + " response",
+                    ClientOperationTypePrefix(inputName) + "Response",
+                    allowInlineObject: true,
+                    out responseType))
+            {
+                return false;
+            }
+
+            AddDependencies(responseType!, dependencies);
+            jsonResponseStatuses = jsonResponses.Select(static response => response.Key).ToArray();
+            return true;
+        }
+
+        private static int ResponseStatusPriority(string status) => status == "200"
+            ? 0
+            : status == "201"
+                ? 1
+                : string.Equals(status, "2XX", StringComparison.OrdinalIgnoreCase)
+                    ? 3
+                    : 2;
+
+        private static bool ResponseSchemasMatch(SimpleJsonObject left, SimpleJsonObject right)
+        {
+            var leftShape = new StringBuilder();
+            var rightShape = new StringBuilder();
+            AppendResponseSchemaShape(leftShape, left);
+            AppendResponseSchemaShape(rightShape, right);
+            return string.Equals(leftShape.ToString(), rightShape.ToString(), StringComparison.Ordinal);
+        }
+
+        private static void AppendResponseSchemaShape(StringBuilder builder, SimpleJsonObject schema)
+        {
+            foreach (var property in schema.Properties
+                         .Where(static property => IsResponseShapeProperty(property.Name))
+                         .OrderBy(static property => property.Name, StringComparer.Ordinal))
+            {
+                builder.Append(property.Name);
+                builder.Append(':');
+                if (property.Name == "properties" && property.Value is SimpleJsonObject properties)
+                {
+                    foreach (var item in properties.Properties.OrderBy(
+                                 static item => item.Name,
+                                 StringComparer.Ordinal))
+                    {
+                        builder.Append(item.Name);
+                        builder.Append('=');
+                        if (item.Value is SimpleJsonObject propertySchema)
+                        {
+                            AppendResponseSchemaShape(builder, propertySchema);
+                        }
+                        else
+                        {
+                            AppendResponseShapeValue(builder, item.Value, sortArray: false);
+                        }
+
+                        builder.Append(';');
+                    }
+                }
+                else if ((property.Name == "required" || property.Name == "type")
+                         && property.Value is SimpleJsonArray)
+                {
+                    AppendResponseShapeValue(builder, property.Value, sortArray: true);
+                }
+                else if ((property.Name == "items" || property.Name == "additionalProperties")
+                         && property.Value is SimpleJsonObject nestedSchema)
+                {
+                    AppendResponseSchemaShape(builder, nestedSchema);
+                }
+                else
+                {
+                    AppendResponseShapeValue(builder, property.Value, sortArray: false);
+                }
+
+                builder.Append('|');
+            }
+        }
+
+        private static void AppendResponseShapeValue(
+            StringBuilder builder,
+            SimpleJsonValue value,
+            bool sortArray)
+        {
+            switch (value)
+            {
+                case SimpleJsonString text:
+                    builder.Append('"');
+                    builder.Append(text.Value);
+                    builder.Append('"');
+                    break;
+                case SimpleJsonNumber number:
+                    builder.Append(number.Text);
+                    break;
+                case SimpleJsonBoolean boolean:
+                    builder.Append(boolean.Value ? "true" : "false");
+                    break;
+                case SimpleJsonNull:
+                    builder.Append("null");
+                    break;
+                case SimpleJsonObject nested:
+                    AppendResponseSchemaShape(builder, nested);
+                    break;
+                case SimpleJsonArray array:
+                    var values = new List<string>(array.Items.Count);
+                    foreach (var item in array.Items)
+                    {
+                        var itemBuilder = new StringBuilder();
+                        AppendResponseShapeValue(itemBuilder, item, sortArray: false);
+                        values.Add(itemBuilder.ToString());
+                    }
+
+                    if (sortArray)
+                    {
+                        values.Sort(StringComparer.Ordinal);
+                    }
+
+                    builder.Append('[');
+                    builder.Append(string.Join(",", values));
+                    builder.Append(']');
+                    break;
+            }
+        }
+
+        private static bool IsResponseShapeProperty(string name) => name is
+            "$ref" or "type" or "format" or "nullable" or "enum" or "properties"
+            or "required" or "items" or "additionalProperties";
+
+        private static string ClientOperationTypePrefix(string inputName) =>
+            inputName.EndsWith("Input", StringComparison.Ordinal)
+                ? inputName.Substring(0, inputName.Length - "Input".Length)
+                : inputName;
 
         private bool TryResolveType(
             SimpleJsonObject schema,
@@ -1530,53 +1993,27 @@ internal static class OpenApiImportGenerator
                     "referenced generated type '" + missing + "' was skipped");
                 _operations.RemoveAt(index);
             }
-        }
 
-        private string Emit()
-        {
-            var writer = new CodeWriter();
-            writer.Line("// <auto-generated/>");
-            writer.Line("#nullable enable");
-            writer.Line();
-            writer.Open("namespace " + _namespace);
-
-            foreach (var declaration in _declarations
-                         .OrderBy(static declaration => declaration.Name, StringComparer.Ordinal))
+            for (var index = _clientOperations.Count - 1; index >= 0; index--)
             {
-                EmitDeclaration(writer, declaration);
-                writer.Line();
-            }
+                var missing = _clientOperations[index].Dependencies.FirstOrDefault(dependency =>
+                    !validNames.Contains(dependency));
+                if (missing is null)
+                {
+                    continue;
+                }
 
-            EmitPaths(writer);
-            writer.Line();
-            foreach (var operation in _operations.OrderBy(static operation => operation.Name, StringComparer.Ordinal))
-            {
-                EmitRecord(writer, operation.InputName, operation.Fields);
-                writer.Line();
+                ReportUnrepresentable(
+                    _root.Position,
+                    _clientOperations[index].Name,
+                    "referenced generated type '" + missing + "' was skipped");
+                _clientOperations.RemoveAt(index);
             }
-
-            EmitSchemas(writer);
-            writer.Close();
-            return writer.ToString();
         }
 
         private static void EmitDeclaration(CodeWriter writer, OpenApiImportDeclaration declaration)
         {
-            if (declaration is OpenApiImportRecord record)
-            {
-                EmitRecord(writer, record.Name, record.Properties);
-                return;
-            }
-
-            var enumDeclaration = (OpenApiImportEnum)declaration;
-            writer.Open("public enum " + enumDeclaration.Name);
-            for (var index = 0; index < enumDeclaration.Members.Count; index++)
-            {
-                var suffix = index + 1 == enumDeclaration.Members.Count ? string.Empty : ",";
-                writer.Line(enumDeclaration.Members[index].Value + suffix);
-            }
-
-            writer.Close();
+            OpenApiCodeEmitter.EmitDeclaration(writer, declaration);
         }
 
         private static void EmitRecord(
@@ -1584,19 +2021,7 @@ internal static class OpenApiImportGenerator
             string name,
             IReadOnlyList<OpenApiImportProperty> properties)
         {
-            if (properties.Count == 0)
-            {
-                writer.Line("public sealed record " + name + "();");
-                return;
-            }
-
-            writer.Line("public sealed record " + name + "(");
-            for (var index = 0; index < properties.Count; index++)
-            {
-                var property = properties[index];
-                var suffix = index + 1 == properties.Count ? ");" : ",";
-                writer.Line("    " + property.Type.Render(property.Required) + " " + property.Identifier + suffix);
-            }
+            OpenApiCodeEmitter.EmitRecord(writer, name, properties);
         }
 
         private void EmitPaths(CodeWriter writer)
@@ -1865,7 +2290,7 @@ internal static class OpenApiImportGenerator
                 StringComparison.Ordinal);
         }
 
-        private static bool TryExactIdentifier(string value, out string identifier)
+        internal static bool TryExactIdentifier(string value, out string identifier)
         {
             identifier = value;
             if (value.Length == 0 || !IsIdentifierStart(value[0]))
@@ -1885,7 +2310,7 @@ internal static class OpenApiImportGenerator
             return true;
         }
 
-        private static string PublicIdentifier(string value, string fallback)
+        internal static string PublicIdentifier(string value, string fallback)
         {
             var builder = new StringBuilder();
             var uppercase = true;
@@ -1942,7 +2367,7 @@ internal static class OpenApiImportGenerator
             return builder.ToString();
         }
 
-        private static bool TryRenderNamespace(string value, out string rendered)
+        internal static bool TryRenderNamespace(string value, out string rendered)
         {
             rendered = string.Empty;
             if (string.IsNullOrWhiteSpace(value))
@@ -2048,6 +2473,17 @@ internal static class OpenApiImportGenerator
         private static bool IsStringEnum(SimpleJsonObject schema) =>
             TryGetArray(schema, "enum", out _)
             && (!TryGetSchemaType(schema, out var type, out _) || type == "string");
+
+        private static bool IsJsonMediaType(string name) =>
+            string.Equals(name, "application/json", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith("+json", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsSuccessStatusCode(string name) =>
+            string.Equals(name, "2XX", StringComparison.OrdinalIgnoreCase)
+            || (name.Length == 3
+                && name[0] == '2'
+                && name[1] >= '0' && name[1] <= '9'
+                && name[2] >= '0' && name[2] <= '9');
 
         private static bool IsTextType(OpenApiImportType type) => type.Kind is
             OpenApiImportTypeKind.String

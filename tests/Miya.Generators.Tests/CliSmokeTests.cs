@@ -141,6 +141,93 @@ public sealed class CliSmokeTests
         }
     }
 
+    [Fact]
+    public async Task Client_command_writes_generated_client_and_reports_argument_errors()
+    {
+        var root = FindRepositoryRoot();
+        var fixture = Path.Combine(
+            root, "tests", "Miya.Generators.Tests", "fixtures", "OpenApiImport", "openapi.json");
+        var output = Path.Combine(Path.GetTempPath(), "miya-gen-client-" + Guid.NewGuid().ToString("N"));
+        var invalidDirectory = Path.Combine(Path.GetTempPath(), "miya-gen-client-invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(invalidDirectory);
+        var invalidInput = Path.Combine(invalidDirectory, "invalid.json");
+        await File.WriteAllTextAsync(invalidInput, "{ invalid");
+        try
+        {
+            var generate = await Run(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "client", "--input", fixture, "--output", output,
+                "--namespace", "Demo.Client", "--class-name", "PetStoreClient");
+
+            Assert.Contains("Miya.OpenApiClient.openapi.g.cs", generate.StandardOutput, StringComparison.Ordinal);
+            var generated = Path.Combine(output, "Miya.OpenApiClient.openapi.g.cs");
+            Assert.True(File.Exists(generated));
+            Assert.Contains("public sealed class PetStoreClient", await File.ReadAllTextAsync(generated), StringComparison.Ordinal);
+
+            var badArguments = await RunAllowingFailure(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "client", "--input", fixture);
+            Assert.Equal(2, badArguments.ExitCode);
+            Assert.Contains("Usage: miya-gen client", badArguments.StandardError, StringComparison.Ordinal);
+
+            var badSpecOutput = Path.Combine(invalidDirectory, "generated");
+            var badSpec = await RunAllowingFailure(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "client", "--input", invalidInput, "--output", badSpecOutput);
+            Assert.Equal(4, badSpec.ExitCode);
+            Assert.Contains("MIYA020", badSpec.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(badSpecOutput));
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+            Directory.Delete(invalidDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Client_command_preserves_outputs_for_other_input_documents()
+    {
+        var root = FindRepositoryRoot();
+        var fixture = Path.Combine(
+            root, "tests", "Miya.Generators.Tests", "fixtures", "OpenApiImport", "openapi.json");
+        var directory = Path.Combine(Path.GetTempPath(), "miya-gen-client-siblings-" + Guid.NewGuid().ToString("N"));
+        var output = Path.Combine(directory, "generated");
+        var firstInput = Path.Combine(directory, "catalog-a.json");
+        var secondInput = Path.Combine(directory, "catalog-b.json");
+        Directory.CreateDirectory(output);
+        File.Copy(fixture, firstInput);
+        File.Copy(fixture, secondInput);
+        try
+        {
+            var first = await Run(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "client", "--input", firstInput, "--output", output,
+                "--namespace", "Demo.First", "--class-name", "FirstClient");
+            var firstOutput = Path.Combine(output, "Miya.OpenApiClient.catalog_a.g.cs");
+            Assert.True(File.Exists(firstOutput), first.StandardOutput);
+
+            var second = await Run(
+                root,
+                "run", "--project", Path.Combine(root, "src", "Miya.Gen", "Miya.Gen.csproj"), "--",
+                "client", "--input", secondInput, "--output", output,
+                "--namespace", "Demo.Second", "--class-name", "SecondClient");
+            var secondOutput = Path.Combine(output, "Miya.OpenApiClient.catalog_b.g.cs");
+
+            Assert.True(File.Exists(firstOutput), second.StandardOutput);
+            Assert.True(File.Exists(secondOutput), second.StandardOutput);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task<ProcessResult> Run(string workingDirectory, params string[] arguments)
     {
         var result = await RunAllowingFailure(workingDirectory, arguments);

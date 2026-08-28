@@ -94,6 +94,38 @@ internal static class DiagnosticCatalog
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    internal static readonly DiagnosticDescriptor FormBodyConflict = new(
+        "MIYA016",
+        "Form and JSON body mappings cannot be combined",
+        "Schema for '{0}' maps fields from both form data and the JSON body",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor DuplicateSchemaPart = new(
+        "MIYA017",
+        "The schema part has more than one definition",
+        "Schema part type '{0}' has more than one definition; declare each part type only once",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor UndeclaredSchemaPart = new(
+        "MIYA018",
+        "The schema part is not declared in this compilation",
+        "Schema part '{0}' has no definition; parts must be declared in the same compilation",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor ExplicitSchemaPartMember = new(
+        "MIYA019",
+        "Schema part members must be implemented implicitly",
+        "Schema part member '{0}' on '{1}' is implemented explicitly; implement the member implicitly",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     internal static readonly DiagnosticDescriptor InvalidOpenApiDocument = new(
         "MIYA020",
         "The OpenAPI document is invalid",
@@ -122,6 +154,30 @@ internal static class DiagnosticCatalog
         "MIYA023",
         "OpenAPI names produce the same C# name",
         "OpenAPI name '{0}' collides with generated C# name '{1}'",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor AmbiguousSchemaPartMember = new(
+        "MIYA024",
+        "The schema part member is ambiguous",
+        "Schema part member '{0}' on '{1}' is contributed by more than one part",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InvalidSchemaRuleDeclaration = new(
+        "MIYA025",
+        "The schema rule declaration is invalid",
+        "Rule declarations must be an inline lambda or a static method containing a single rule chain",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InaccessibleSchemaRuleMember = new(
+        "MIYA026",
+        "A schema rule member is inaccessible to generated code",
+        "Member '{0}' must be internal or public because generated code references it",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

@@ -5,6 +5,15 @@ namespace Miya.Schema;
 public static class Schemas
 {
     public static Schema<T> For<T>() => new(BinderRegistry<T>.Get());
+
+    /// <summary>
+    /// Creates a reusable schema part for <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The interface or base type that declares the fields in the schema part.
+    /// </typeparam>
+    /// <returns>A schema part for <typeparamref name="T"/>.</returns>
+    public static SchemaPart<T> Part<T>() => new();
 }
 
 public sealed class Schema<T>
@@ -29,6 +38,19 @@ public sealed class Schema<T>
     }
 
     public Schema<T> Body<F>(Func<T, F> field, Action<Rule<F>>? rules = null)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return this;
+    }
+
+    /// <summary>
+    /// Binds a field from a URL-encoded or multipart form field.
+    /// </summary>
+    /// <typeparam name="F">The field type.</typeparam>
+    /// <param name="field">A selector for the input field.</param>
+    /// <param name="rules">Optional validation and default-value rules.</param>
+    /// <returns>This schema.</returns>
+    public Schema<T> Form<F>(Func<T, F> field, Action<Rule<F>>? rules = null)
     {
         ArgumentNullException.ThrowIfNull(field);
         return this;

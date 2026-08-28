@@ -38,6 +38,43 @@ public sealed class KestrelIntegrationTests
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task CookiesRoundTripAndMultipleSetCookieHeadersRemainSeparate()
+    {
+        var app = new App();
+        app.Get("/set", context =>
+        {
+            context.SetCookie("first", "one");
+            context.SetCookie("second", "two", new CookieOptions { HttpOnly = true });
+            return context.Text("set");
+        });
+        app.Get("/read", context => context.Text(
+            string.Concat(context.Req.Cookie("first"), "|", context.Req.Cookie("second"))));
+
+        await using var server = await StartAsync(app);
+        using var handler = new HttpClientHandler
+        {
+            CookieContainer = new CookieContainer(),
+            UseCookies = true,
+        };
+        using var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri(server.Addresses[0]),
+            Timeout = OperationTimeout,
+        };
+        using var setResponse = await client.GetAsync("/set");
+
+        Assert.True(setResponse.Headers.TryGetValues("Set-Cookie", out var setCookieValues));
+        var setCookies = setCookieValues.ToArray();
+        Assert.Equal(2, setCookies.Length);
+        Assert.Equal("first=one; Path=/; SameSite=Lax", setCookies[0]);
+        Assert.Equal("second=two; Path=/; HttpOnly; SameSite=Lax", setCookies[1]);
+
+        using var readResponse = await client.GetAsync("/read");
+        Assert.Equal(HttpStatusCode.OK, readResponse.StatusCode);
+        Assert.Equal("one|two", await readResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
     public async Task ConfigureServicesUsesServiceBackedHostForCleartext()
     {
         var app = new App();
@@ -124,6 +161,28 @@ public sealed class KestrelIntegrationTests
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal("GET, HEAD, OPTIONS", response.Content.Headers.Allow.ToString());
         Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task AllowCombinesEveryRoutePatternMatchingTheTransportPath()
+    {
+        var app = new App();
+        app.Get("/users/:id", context => context.Text("get"));
+        app.Post("/users/me", context => context.Text("post"));
+        app.Put("/users/*rest", context => context.Text("put"));
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var mismatchRequest = new HttpRequestMessage(HttpMethod.Delete, "/users/me");
+        using var mismatch = await client.SendAsync(mismatchRequest);
+        using var optionsRequest = new HttpRequestMessage(HttpMethod.Options, "/users/me");
+        using var options = await client.SendAsync(optionsRequest);
+
+        const string expected = "GET, HEAD, POST, PUT, OPTIONS";
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, mismatch.StatusCode);
+        Assert.Equal(expected, mismatch.Content.Headers.Allow.ToString());
+        Assert.Equal(HttpStatusCode.NoContent, options.StatusCode);
+        Assert.Equal(expected, options.Content.Headers.Allow.ToString());
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
@@ -675,6 +734,135 @@ public sealed class KestrelIntegrationTests
     }
 
     [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task DefaultAddressBindsLoopback()
+    {
+        var previousHost = Environment.GetEnvironmentVariable("HOST");
+        Server? server = null;
+        try
+        {
+            Environment.SetEnvironmentVariable("HOST", null);
+            var app = new App();
+            app.Get("/", context => context.Text("Hello"));
+            server = await app.StartAsync(new AppOptions
+            {
+                Port = 0,
+                ShutdownTimeout = TimeSpan.FromSeconds(2),
+            });
+
+            var (address, port) = ParseBoundEndpoint(server);
+            Assert.Equal(IPAddress.Loopback, address);
+            Assert.InRange(port, 1, 65535);
+
+            using var client = CreateClient(IPAddress.Loopback, port);
+            using var response = await client.GetAsync("/");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            if (server is not null)
+            {
+                await server.DisposeAsync();
+            }
+
+            Environment.SetEnvironmentVariable("HOST", previousHost);
+        }
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task AnyAddressAcceptsLoopbackConnections()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Address = IPAddress.Any,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+
+        var (address, port) = ParseBoundEndpoint(server);
+        Assert.Equal(IPAddress.Any, address);
+        Assert.InRange(port, 1, 65535);
+
+        using var client = CreateClient(IPAddress.Loopback, port);
+        using var response = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task AnyAddressAcceptsLoopbackConnectionsOnServiceBackedHost()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Address = IPAddress.Any,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+            ConfigureServices = _ => { },
+        });
+
+        var (address, port) = ParseBoundEndpoint(server);
+        Assert.Equal(IPAddress.Any, address);
+
+        using var client = CreateClient(IPAddress.Loopback, port);
+        using var response = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [IPv6Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task IPv6LoopbackAddressAcceptsIPv6LoopbackConnections()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Address = IPAddress.IPv6Loopback,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+
+        var (address, port) = ParseBoundEndpoint(server);
+        Assert.Equal(IPAddress.IPv6Loopback, address);
+        Assert.InRange(port, 1, 65535);
+
+        using var client = CreateClient(IPAddress.IPv6Loopback, port);
+        using var response = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task PortZeroReportsNonDefaultAddress()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text("Hello"));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Address = IPAddress.Any,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+
+        var (address, port) = ParseBoundEndpoint(server);
+        Assert.Equal(IPAddress.Any, address);
+        Assert.NotEqual(0, port);
+        Assert.InRange(port, 1, 65535);
+
+        using var client = CreateClient(IPAddress.Loopback, port);
+        using var response = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hello", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
     public async Task EnvironmentPortIsUsedWhenOptionIsOmitted()
     {
         var previousPort = Environment.GetEnvironmentVariable("PORT");
@@ -701,6 +889,113 @@ public sealed class KestrelIntegrationTests
 
             Environment.SetEnvironmentVariable("PORT", previousPort);
         }
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ConnectionInfoReportsLoopbackAddressesForHttp1()
+    {
+        var app = new App();
+        app.Get("/", context =>
+        {
+            var remote = context.Req.RemoteAddress;
+            var local = context.Req.LocalAddress;
+            return context.Text(
+                $"{remote}|{local}|{context.Req.RemotePort}|{context.Req.LocalPort}|{context.Req.Protocol}|{context.Req.IsHttps}");
+        });
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        var parts = body.Split('|');
+        Assert.Equal("127.0.0.1", parts[0]);
+        Assert.Equal("127.0.0.1", parts[1]);
+        Assert.InRange(int.Parse(parts[2], CultureInfo.InvariantCulture), 1, 65535);
+        Assert.InRange(int.Parse(parts[3], CultureInfo.InvariantCulture), 1, 65535);
+        Assert.Equal("HTTP/1.1", parts[4]);
+        Assert.Equal("False", parts[5]);
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ConnectionInfoReportsHttp2ProtocolForH2c()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text(context.Req.Protocol));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Protocols = Protocols.Http2,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var request = CreateGetRequest(HttpVersion.Version20);
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpVersion.Version20, response.Version);
+        Assert.Equal("HTTP/2", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task ConnectionInfoReportsLoopbackRemoteAddressForHttp2()
+    {
+        var app = new App();
+        app.Get("/", context => context.Text(context.Req.RemoteAddress!.ToString()));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Protocols = Protocols.Http2,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateClient(server);
+        using var request = CreateGetRequest(HttpVersion.Version20);
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("127.0.0.1", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task IsHttpsIsTrueOverTls()
+    {
+        using var certificate = CreateCertificate();
+        var app = new App();
+        app.Get("/", context => context.Text(context.Req.IsHttps.ToString()));
+
+        await using var server = await app.StartAsync(new AppOptions
+        {
+            Port = 0,
+            Certificate = certificate,
+            ShutdownTimeout = TimeSpan.FromSeconds(2),
+        });
+        using var client = CreateTlsClient(server);
+        using var request = CreateGetRequest(HttpVersion.Version11);
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("True", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(Timeout = TestTimeoutMilliseconds)]
+    public async Task QueryAllReturnsRepeatedValuesOverHttp1()
+    {
+        var app = new App();
+        app.Get("/", context =>
+        {
+            var values = context.Req.QueryAll("tag");
+            return context.Text(string.Join(",", values));
+        });
+
+        await using var server = await StartAsync(app);
+        using var client = CreateClient(server);
+        using var response = await client.GetAsync("/?tag=a&tag=b&tag=c");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("a,b,c", await response.Content.ReadAsStringAsync());
     }
 
     private static App CreateBodyReadingApp()
@@ -737,6 +1032,24 @@ public sealed class KestrelIntegrationTests
         BaseAddress = new Uri(server.Addresses[0]),
         Timeout = OperationTimeout,
     };
+
+    private static HttpClient CreateClient(IPAddress address, int port)
+    {
+        var host = address.AddressFamily == AddressFamily.InterNetworkV6
+            ? $"[{address}]"
+            : address.ToString();
+        return new HttpClient
+        {
+            BaseAddress = new Uri($"http://{host}:{port}/"),
+            Timeout = OperationTimeout,
+        };
+    }
+
+    private static (IPAddress Address, int Port) ParseBoundEndpoint(Server server)
+    {
+        var uri = new Uri(Assert.Single(server.Addresses));
+        return (IPAddress.Parse(uri.Host), uri.Port);
+    }
 
     private static HttpClient CreateTlsClient(Server server)
     {
@@ -790,6 +1103,17 @@ internal sealed class QuicFactAttribute : FactAttribute
         if (!QuicListener.IsSupported)
         {
             Skip = "System.Net.Quic.QuicListener.IsSupported is false on this platform.";
+        }
+    }
+}
+
+internal sealed class IPv6FactAttribute : FactAttribute
+{
+    public IPv6FactAttribute()
+    {
+        if (!Socket.OSSupportsIPv6)
+        {
+            Skip = "Socket.OSSupportsIPv6 is false on this platform.";
         }
     }
 }
@@ -896,6 +1220,28 @@ internal sealed class RawHttpConnection : IAsyncDisposable
 
     public async Task<RawHttpResponse> ReadResponseAsync()
     {
+        var headers = await ReadHeadersAsync();
+        var contentLength = headers.Headers.TryGetValue("Content-Length", out var rawLength)
+            ? int.Parse(rawLength, NumberStyles.None, CultureInfo.InvariantCulture)
+            : 0;
+        var body = new byte[contentLength];
+        var offset = 0;
+        while (offset < body.Length)
+        {
+            var read = await ReadBodyAsync(body.AsMemory(offset));
+            if (read == 0)
+            {
+                throw new EndOfStreamException("The connection closed before the HTTP response body completed.");
+            }
+
+            offset += read;
+        }
+
+        return headers with { Body = Encoding.UTF8.GetString(body) };
+    }
+
+    public async Task<RawHttpResponse> ReadHeadersAsync()
+    {
         using var timeout = new CancellationTokenSource(OperationTimeout);
         var headerBytes = new List<byte>();
         var oneByte = new byte[1];
@@ -936,23 +1282,13 @@ internal sealed class RawHttpConnection : IAsyncDisposable
             headers[lines[i][..separator]] = lines[i][(separator + 1)..].Trim();
         }
 
-        var contentLength = headers.TryGetValue("Content-Length", out var rawLength)
-            ? int.Parse(rawLength, NumberStyles.None, CultureInfo.InvariantCulture)
-            : 0;
-        var body = new byte[contentLength];
-        var offset = 0;
-        while (offset < body.Length)
-        {
-            var read = await _stream.ReadAsync(body.AsMemory(offset), timeout.Token);
-            if (read == 0)
-            {
-                throw new EndOfStreamException("The connection closed before the HTTP response body completed.");
-            }
+        return new RawHttpResponse(statusCode, headers, Body: string.Empty);
+    }
 
-            offset += read;
-        }
-
-        return new RawHttpResponse(statusCode, headers, Encoding.UTF8.GetString(body));
+    public async Task<int> ReadBodyAsync(Memory<byte> buffer)
+    {
+        using var timeout = new CancellationTokenSource(OperationTimeout);
+        return await _stream.ReadAsync(buffer, timeout.Token);
     }
 
     public ValueTask DisposeAsync()

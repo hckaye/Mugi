@@ -15,7 +15,9 @@ internal sealed class InvocationAnalysis
         RouteCall? route,
         Diagnostic? diagnostic,
         SchemaDefinition? schemaDefinition = null,
-        SchemaEndpointCall? schemaEndpoint = null)
+        SchemaPartDefinition? schemaPartDefinition = null,
+        SchemaEndpointCall? schemaEndpoint = null,
+        ImmutableArray<Diagnostic> diagnostics = default)
     {
         Syntax = syntax;
         JsonType = jsonType;
@@ -23,8 +25,13 @@ internal sealed class InvocationAnalysis
         JsonTargetMethod = jsonTargetMethod;
         JsonInterceptAttribute = jsonInterceptAttribute;
         Route = route;
-        Diagnostic = diagnostic;
+        Diagnostics = diagnostics.IsDefault
+            ? diagnostic is null
+                ? ImmutableArray<Diagnostic>.Empty
+                : ImmutableArray.Create(diagnostic)
+            : diagnostics;
         SchemaDefinition = schemaDefinition;
+        SchemaPartDefinition = schemaPartDefinition;
         SchemaEndpoint = schemaEndpoint;
     }
 
@@ -40,9 +47,11 @@ internal sealed class InvocationAnalysis
 
     internal RouteCall? Route { get; }
 
-    internal Diagnostic? Diagnostic { get; }
+    internal ImmutableArray<Diagnostic> Diagnostics { get; }
 
     internal SchemaDefinition? SchemaDefinition { get; }
+
+    internal SchemaPartDefinition? SchemaPartDefinition { get; }
 
     internal SchemaEndpointCall? SchemaEndpoint { get; }
 }
@@ -53,6 +62,7 @@ internal enum SchemaFieldSource
     Route,
     Query,
     Body,
+    Form,
     Header,
 }
 
@@ -78,12 +88,14 @@ internal sealed class SchemaDefinition
     internal SchemaDefinition(
         ITypeSymbol inputType,
         ImmutableArray<SchemaFieldDeclaration> fields,
-        Diagnostic? diagnostic,
+        ImmutableArray<SchemaPartUse> parts,
+        ImmutableArray<Diagnostic> diagnostics,
         Location location)
     {
         InputType = inputType;
         Fields = fields;
-        Diagnostic = diagnostic;
+        Parts = parts;
+        Diagnostics = diagnostics;
         Location = location;
     }
 
@@ -91,7 +103,45 @@ internal sealed class SchemaDefinition
 
     internal ImmutableArray<SchemaFieldDeclaration> Fields { get; }
 
-    internal Diagnostic? Diagnostic { get; }
+    internal ImmutableArray<SchemaPartUse> Parts { get; }
+
+    internal ImmutableArray<Diagnostic> Diagnostics { get; }
+
+    internal Location Location { get; }
+}
+
+internal sealed class SchemaPartDefinition
+{
+    internal SchemaPartDefinition(
+        ITypeSymbol partType,
+        ImmutableArray<SchemaFieldDeclaration> fields,
+        ImmutableArray<Diagnostic> diagnostics,
+        Location location)
+    {
+        PartType = partType;
+        Fields = fields;
+        Diagnostics = diagnostics;
+        Location = location;
+    }
+
+    internal ITypeSymbol PartType { get; }
+
+    internal ImmutableArray<SchemaFieldDeclaration> Fields { get; }
+
+    internal ImmutableArray<Diagnostic> Diagnostics { get; }
+
+    internal Location Location { get; }
+}
+
+internal sealed class SchemaPartUse
+{
+    internal SchemaPartUse(ITypeSymbol partType, Location location)
+    {
+        PartType = partType;
+        Location = location;
+    }
+
+    internal ITypeSymbol PartType { get; }
 
     internal Location Location { get; }
 }

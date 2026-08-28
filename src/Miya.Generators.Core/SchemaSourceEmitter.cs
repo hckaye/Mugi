@@ -70,6 +70,24 @@ internal static class SchemaBindingBuilder
         ImmutableArray<InvocationAnalysis> analyses,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
+        var partDefinitions = new Dictionary<ITypeSymbol, SchemaPartDefinition>(SymbolEqualityComparer.Default);
+        foreach (var partDefinition in analyses
+                     .Where(static analysis => analysis.SchemaPartDefinition is not null)
+                     .Select(static analysis => analysis.SchemaPartDefinition!))
+        {
+            if (!partDefinitions.ContainsKey(partDefinition.PartType))
+            {
+                partDefinitions.Add(partDefinition.PartType, partDefinition);
+            }
+            else
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticCatalog.DuplicateSchemaPart,
+                    partDefinition.Location,
+                    partDefinition.PartType.ToDisplayString()));
+            }
+        }
+
         var definitions = new Dictionary<ITypeSymbol, SchemaDefinition>(SymbolEqualityComparer.Default);
         foreach (var definition in analyses
                      .Where(static analysis => analysis.SchemaDefinition is not null)
@@ -77,7 +95,9 @@ internal static class SchemaBindingBuilder
         {
             if (!definitions.ContainsKey(definition.InputType))
             {
-                definitions.Add(definition.InputType, definition);
+                definitions.Add(
+                    definition.InputType,
+                    MergeParts(definition, partDefinitions, diagnostics));
             }
             else
             {
@@ -123,11 +143,133 @@ internal static class SchemaBindingBuilder
             .ToImmutableArray();
     }
 
+    private static SchemaDefinition MergeParts(
+        SchemaDefinition definition,
+        Dictionary<ITypeSymbol, SchemaPartDefinition> partDefinitions,
+        ImmutableArray<Diagnostic>.Builder diagnostics)
+    {
+        if (definition.Parts.Length == 0)
+        {
+            return definition;
+        }
+
+        var fields = ImmutableArray.CreateBuilder<SchemaFieldDeclaration>();
+        fields.AddRange(definition.Fields);
+        var directNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in definition.Fields)
+        {
+            directNames.Add(field.Property.Name);
+        }
+
+        var partNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var part in definition.Parts)
+        {
+            if (!partDefinitions.TryGetValue(part.PartType, out var partDefinition))
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticCatalog.UndeclaredSchemaPart,
+                    part.Location,
+                    part.PartType.ToDisplayString()));
+                continue;
+            }
+
+            foreach (var field in partDefinition.Fields)
+            {
+                var name = field.Property.Name;
+                if (directNames.Contains(name))
+                {
+                    continue;
+                }
+
+                if (!partNames.Add(name))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticCatalog.AmbiguousSchemaPartMember,
+                        part.Location,
+                        name,
+                        definition.InputType.ToDisplayString()));
+                    continue;
+                }
+
+                var property = FindPublicInstanceProperty(definition.InputType, field.Property);
+                if (property is null)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticCatalog.ExplicitSchemaPartMember,
+                        part.Location,
+                        name,
+                        definition.InputType.ToDisplayString()));
+                    continue;
+                }
+
+                fields.Add(new SchemaFieldDeclaration(
+                    property,
+                    field.Source,
+                    field.HeaderName,
+                    field.Rules,
+                    field.Location));
+            }
+        }
+
+        return new SchemaDefinition(
+            definition.InputType,
+            fields.ToImmutable(),
+            ImmutableArray<SchemaPartUse>.Empty,
+            definition.Diagnostics,
+            definition.Location);
+    }
+
+    private static IPropertySymbol? FindPublicInstanceProperty(
+        ITypeSymbol inputType,
+        IPropertySymbol partProperty)
+    {
+        if (!(inputType is INamedTypeSymbol namedType))
+        {
+            return null;
+        }
+
+        for (var current = namedType; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers(partProperty.Name))
+            {
+                if (member is IPropertySymbol property
+                    && !property.IsStatic
+                    && !property.IsIndexer
+                    && property.DeclaredAccessibility == Accessibility.Public
+                    && property.GetMethod?.DeclaredAccessibility == Accessibility.Public
+                    && SymbolEqualityComparer.Default.Equals(property.Type, partProperty.Type))
+                {
+                    return property;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static SchemaBindingModel? TryBuild(
         SchemaEndpointCall endpoint,
         SchemaDefinition? definition,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
+        if (definition is not null)
+        {
+            foreach (var field in definition.Fields)
+            {
+                if (field.Source == SchemaFieldSource.Form
+                    && IsFormFile(field.Property.Type))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticCatalog.UnsupportedSchemaFieldType,
+                        field.Location,
+                        field.Property.Name,
+                        "form",
+                        "file uploads are not supported by form field binding"));
+                    return null;
+                }
+            }
+        }
+
         if (!JsonTypeGraphBuilder.TryBuild(endpoint.InputType, out var graph, out var error))
         {
             diagnostics.Add(Diagnostic.Create(
@@ -163,7 +305,30 @@ internal static class SchemaBindingBuilder
         var bodyByDefault = endpoint.Method is "POST" or "PUT" or "PATCH";
         var fields = ImmutableArray.CreateBuilder<SchemaBoundField>(inputModel.Properties.Length);
         var valid = true;
+        var orderedProperties = ImmutableArray.CreateBuilder<JsonPropertyModel>(inputModel.Properties.Length);
+        if (definition is not null)
+        {
+            foreach (var declaration in definition.Fields)
+            {
+                var declaredProperty = inputModel.Properties.FirstOrDefault(propertyModel =>
+                    SymbolEqualityComparer.Default.Equals(propertyModel.Property, declaration.Property));
+                if (declaredProperty is not null)
+                {
+                    orderedProperties.Add(declaredProperty);
+                }
+            }
+        }
+
         foreach (var propertyModel in inputModel.Properties)
+        {
+            if (!orderedProperties.Any(candidate =>
+                    SymbolEqualityComparer.Default.Equals(candidate.Property, propertyModel.Property)))
+            {
+                orderedProperties.Add(propertyModel);
+            }
+        }
+
+        foreach (var propertyModel in orderedProperties)
         {
             var property = propertyModel.Property;
             declarations.TryGetValue(property, out var declaration);
@@ -198,6 +363,18 @@ internal static class SchemaBindingBuilder
 
             valid &= ValidateRules(property, rules, diagnostics);
             fields.Add(new SchemaBoundField(property, source, headerName, rules, location));
+        }
+
+        var hasForm = fields.Any(static field => field.Source == SchemaFieldSource.Form);
+        var hasBody = fields.Any(static field => field.Source == SchemaFieldSource.Body);
+        if (hasForm && hasBody)
+        {
+            var formField = fields.First(static field => field.Source == SchemaFieldSource.Form);
+            diagnostics.Add(Diagnostic.Create(
+                DiagnosticCatalog.FormBodyConflict,
+                formField.Location,
+                endpoint.InputType.ToDisplayString()));
+            valid = false;
         }
 
         foreach (var routeName in endpoint.Template.ParameterNames)
@@ -331,6 +508,13 @@ internal static class SchemaBindingBuilder
         return false;
     }
 
+    private static bool IsFormFile(ITypeSymbol type)
+    {
+        var underlying = UnwrapNullable(type);
+        return underlying is INamedTypeSymbol named
+            && InvocationAnalyzer.GetMetadataName(named.OriginalDefinition) == "Miya.FormFile";
+    }
+
     internal static ITypeSymbol UnwrapNullable(ITypeSymbol type)
     {
         if (type is INamedTypeSymbol named
@@ -360,11 +544,18 @@ internal sealed class SchemaSourceEmitter
 {
     private readonly SchemaBindingModel _model;
     private readonly GeneratorSettings _settings;
+    private readonly ImmutableArray<string> _patterns;
 
     internal SchemaSourceEmitter(SchemaBindingModel model, GeneratorSettings settings)
     {
         _model = model;
         _settings = settings;
+        _patterns = model.Fields
+            .SelectMany(static field => field.Rules)
+            .Where(static rule => rule.Kind == SchemaRuleKind.Pattern)
+            .Select(static rule => (string)rule.Values[0]!)
+            .Distinct(StringComparer.Ordinal)
+            .ToImmutableArray();
     }
 
     internal string Emit()
@@ -380,6 +571,13 @@ internal sealed class SchemaSourceEmitter
             "internal sealed class " + binderName +
             " : global::Miya.Schema.IInputBinder<" + TypeNames.NonNullableDisplay(_model.InputType) + ">");
         writer.Line("internal static readonly " + binderName + " Instance = new " + binderName + "();");
+        for (var index = 0; index < _patterns.Length; index++)
+        {
+            writer.Line(
+                "private static readonly global::System.Text.RegularExpressions.Regex Pattern" + index +
+                " = global::Miya.Schema.SchemaRegex.Create(" + GeneratedNaming.Literal(_patterns[index]) + ");");
+        }
+
         writer.Line();
         EmitBind(writer);
         writer.Line();
@@ -442,6 +640,10 @@ internal sealed class SchemaSourceEmitter
             }
 
             writer.Close();
+        }
+        else if (_model.Fields.Any(static field => field.Source == SchemaFieldSource.Form))
+        {
+            EmitFormRead(writer, inputName);
         }
         else
         {
@@ -538,6 +740,21 @@ internal sealed class SchemaSourceEmitter
         writer.Close();
     }
 
+    private static void EmitFormRead(CodeWriter writer, string inputName)
+    {
+        writer.Line("global::Miya.FormData form;");
+        writer.Open("try");
+        writer.Line("form = await context.Req.Form().ConfigureAwait(false);");
+        writer.Close();
+        writer.Open("catch (global::Miya.FormException exception) when (exception.IsInputError)");
+        writer.Line(
+            "errors.Add(new global::Miya.Schema.ValidationError(\"\", exception.Message));");
+        writer.Line("await WriteErrors(context, errors).ConfigureAwait(false);");
+        writer.Line(
+            "return global::Miya.Schema.BindResult<" + inputName + ">.Invalid(errors);");
+        writer.Close();
+    }
+
     private void EmitTextRead(CodeWriter writer, SchemaBoundField field, int index)
     {
         string read;
@@ -552,6 +769,9 @@ internal sealed class SchemaSourceEmitter
             case SchemaFieldSource.Header:
                 read = "context.Req.Header(" + GeneratedNaming.Literal(field.HeaderName ?? field.Property.Name) + ")";
                 break;
+            case SchemaFieldSource.Form:
+                read = "form.Get(" + GeneratedNaming.Literal(field.Property.Name) + ")";
+                break;
             default:
                 throw new InvalidOperationException("Unknown text field source.");
         }
@@ -563,7 +783,7 @@ internal sealed class SchemaSourceEmitter
         writer.Close();
     }
 
-    private static void EmitParse(CodeWriter writer, SchemaBoundField field, int index)
+    private void EmitParse(CodeWriter writer, SchemaBoundField field, int index)
     {
         var type = field.Property.Type;
         var underlying = SchemaBindingBuilder.UnwrapNullable(type);
@@ -600,19 +820,27 @@ internal sealed class SchemaSourceEmitter
             }
             else if (metadataName == "System.DateTime")
             {
-                parse = "global::System.DateTime.TryParse(raw" + index + ", global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.RoundtripKind, out var " + temporary + ")";
+                parse = "global::Miya.Schema.SchemaText.TryParseDateTime(raw" + index + ", out var " + temporary + ")";
             }
             else if (metadataName == "System.DateTimeOffset")
             {
-                parse = "global::System.DateTimeOffset.TryParse(raw" + index + ", global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.RoundtripKind, out var " + temporary + ")";
+                parse = "global::Miya.Schema.SchemaText.TryParseDateTimeOffset(raw" + index + ", out var " + temporary + ")";
             }
             else if (underlying.SpecialType == SpecialType.System_Boolean)
             {
                 parse = "global::System.Boolean.TryParse(raw" + index + ", out var " + temporary + ")";
             }
+            else if (underlying.SpecialType is SpecialType.System_Single or SpecialType.System_Double)
+            {
+                parse = "global::Miya.Schema.SchemaText.TryParseFloatingPoint<" + target + ">(raw" + index + ", out var " + temporary + ")";
+            }
+            else if (underlying.SpecialType == SpecialType.System_Decimal)
+            {
+                parse = "global::Miya.Schema.SchemaText.TryParseDecimal(raw" + index + ", out var " + temporary + ")";
+            }
             else
             {
-                parse = target + ".TryParse(raw" + index + ", global::System.Globalization.NumberStyles.Any, global::System.Globalization.CultureInfo.InvariantCulture, out var " + temporary + ")";
+                parse = "global::Miya.Schema.SchemaText.TryParseInteger<" + target + ">(raw" + index + ", out var " + temporary + ")";
             }
         }
 
@@ -622,13 +850,13 @@ internal sealed class SchemaSourceEmitter
         EmitParseFailure(writer, field, index);
     }
 
-    private static void EmitParseFailure(CodeWriter writer, SchemaBoundField field, int index)
+    private void EmitParseFailure(CodeWriter writer, SchemaBoundField field, int index)
     {
         writer.Open("else");
         writer.Line("valid" + index + " = false;");
         writer.Line(
             "errors.Add(new global::Miya.Schema.ValidationError(" +
-            GeneratedNaming.Literal(GeneratedNaming.JsonPropertyName(field.Property.Name, JsonNaming.CamelCase)) +
+            GeneratedNaming.Literal(GeneratedNaming.JsonPropertyName(field.Property.Name, _settings.Naming)) +
             ", \"has an invalid value\"));");
         writer.Close();
     }
@@ -680,7 +908,7 @@ internal sealed class SchemaSourceEmitter
         }
     }
 
-    private static void EmitRule(
+    private void EmitRule(
         CodeWriter writer,
         SchemaBoundField field,
         SchemaRuleDeclaration rule,
@@ -734,9 +962,8 @@ internal sealed class SchemaSourceEmitter
                 message = "length must be at most " + DisplayConstant(rule.Values[0]);
                 break;
             case SchemaRuleKind.Pattern:
-                test = "!global::System.Text.RegularExpressions.Regex.IsMatch(" + value + ", " +
-                    GeneratedNaming.Literal((string)rule.Values[0]!) +
-                    ", global::System.Text.RegularExpressions.RegexOptions.CultureInvariant)";
+                test = "!global::Miya.Schema.SchemaRegex.IsMatch(" +
+                    PatternField((string)rule.Values[0]!) + ", " + value + ")";
                 message = "has an invalid format";
                 break;
             case SchemaRuleKind.Must:
@@ -753,12 +980,25 @@ internal sealed class SchemaSourceEmitter
         writer.Close();
     }
 
-    private static void AddError(CodeWriter writer, SchemaBoundField field, string message)
+    private void AddError(CodeWriter writer, SchemaBoundField field, string message)
     {
         writer.Line(
             "errors.Add(new global::Miya.Schema.ValidationError(" +
-            GeneratedNaming.Literal(GeneratedNaming.JsonPropertyName(field.Property.Name, JsonNaming.CamelCase)) + ", " +
+            GeneratedNaming.Literal(GeneratedNaming.JsonPropertyName(field.Property.Name, _settings.Naming)) + ", " +
             GeneratedNaming.Literal(message) + "));");
+    }
+
+    private string PatternField(string pattern)
+    {
+        for (var index = 0; index < _patterns.Length; index++)
+        {
+            if (string.Equals(_patterns[index], pattern, StringComparison.Ordinal))
+            {
+                return "Pattern" + index;
+            }
+        }
+
+        throw new InvalidOperationException("The schema pattern was not registered.");
     }
 
     private string Construction()
@@ -779,7 +1019,10 @@ internal sealed class SchemaSourceEmitter
         var result = "new " + TypeNames.NonNullableDisplay(_model.InputType) + "(" +
             string.Join(", ", primaryIndexes.Select(ValueExpression)) + ")";
         var remaining = Enumerable.Range(0, _model.Fields.Length)
-            .Where(index => !_model.InputModel.Properties[index].IsPrimary)
+            .Where(index => !_model.InputModel.PrimaryProperties.Any(primary =>
+                SymbolEqualityComparer.Default.Equals(
+                    primary.Property,
+                    _model.Fields[index].Property)))
             .ToList();
         if (remaining.Count == 0)
         {

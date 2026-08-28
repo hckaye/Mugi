@@ -147,6 +147,7 @@ public partial class App<TContext>
 
     internal async ValueTask ExecuteAsync(IFeatureCollection features, AppOptions? options = null)
     {
+        options?.Validate();
         var context = CreateContext(features, options);
         try
         {
@@ -232,6 +233,7 @@ public partial class App<TContext>
         {
             BadHttpRequestException badRequest => badRequest.StatusCode,
             JsonException jsonException when jsonException.IsInputError => StatusCodes.Status400BadRequest,
+            FormException formException when formException.IsInputError => formException.StatusCode,
             _ => StatusCodes.Status500InternalServerError,
         };
 
@@ -240,6 +242,7 @@ public partial class App<TContext>
         {
             StatusCodes.Status400BadRequest => "Bad Request",
             StatusCodes.Status413PayloadTooLarge => "Payload Too Large",
+            StatusCodes.Status415UnsupportedMediaType => "Unsupported Media Type",
             _ => "Internal Server Error",
         });
     }
@@ -349,10 +352,10 @@ internal sealed class ContextPool<TContext>
     public void Return(TContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var reusable = _poolingEnabled;
+        var reusable = _poolingEnabled && context.CanReturnToPool;
         try
         {
-            if (_callOnReturn)
+            if (_callOnReturn && reusable)
             {
                 ((IPoolableContext)context).OnReturn();
             }

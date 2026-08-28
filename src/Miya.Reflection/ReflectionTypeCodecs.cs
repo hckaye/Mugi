@@ -490,6 +490,9 @@ internal sealed class PocoReflectionCodec : ReflectionTypeCodec
     private readonly ConstructorInfo? _constructor;
     private readonly int[] _constructorPropertyIndexes;
     private readonly bool[] _constructorBoundProperties;
+    private readonly bool[] _requiredProperties;
+    private readonly bool[] _hasConstructorDefaults;
+    private readonly object?[] _constructorDefaults;
 
     private PocoReflectionCodec(
         Type type,
@@ -502,9 +505,35 @@ internal sealed class PocoReflectionCodec : ReflectionTypeCodec
         _constructor = constructor;
         _constructorPropertyIndexes = constructorPropertyIndexes;
         _constructorBoundProperties = new bool[properties.Length];
+        _requiredProperties = new bool[properties.Length];
+        _hasConstructorDefaults = new bool[properties.Length];
+        _constructorDefaults = new object?[properties.Length];
+        for (var index = 0; index < properties.Length; index++)
+        {
+            _requiredProperties[index] = properties[index].IsRequired;
+        }
+
+        var parameters = constructor?.GetParameters();
         foreach (var propertyIndex in constructorPropertyIndexes)
         {
             _constructorBoundProperties[propertyIndex] = true;
+        }
+
+        if (parameters is not null)
+        {
+            for (var index = 0; index < parameters.Length; index++)
+            {
+                var propertyIndex = constructorPropertyIndexes[index];
+                if (parameters[index].HasDefaultValue)
+                {
+                    _hasConstructorDefaults[propertyIndex] = true;
+                    _constructorDefaults[propertyIndex] = parameters[index].DefaultValue;
+                }
+                else
+                {
+                    _requiredProperties[propertyIndex] = true;
+                }
+            }
         }
     }
 
@@ -593,6 +622,11 @@ internal sealed class PocoReflectionCodec : ReflectionTypeCodec
             {
                 values[index] = Activator.CreateInstance(propertyType);
             }
+
+            if (_hasConstructorDefaults[index])
+            {
+                values[index] = _constructorDefaults[index];
+            }
         }
 
         var present = new bool[_properties.Length];
@@ -623,7 +657,7 @@ internal sealed class PocoReflectionCodec : ReflectionTypeCodec
 
         for (var index = 0; index < _properties.Length; index++)
         {
-            if (_properties[index].IsRequired && !present[index])
+            if (_requiredProperties[index] && !present[index])
             {
                 throw new JsonException(
                     $"Required property '{_properties[index].JsonName}' is missing for '{_type}'.",

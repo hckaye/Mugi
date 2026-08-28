@@ -368,6 +368,30 @@ public ref struct JsonReader
         _disposed = true;
     }
 
+    internal JsonTokenKind PeekValueKind()
+    {
+        SkipWhitespace();
+        if (_position >= _source.Length)
+        {
+            return JsonTokenKind.Invalid;
+        }
+
+        return _source[_position] switch
+        {
+            (byte)'{' => JsonTokenKind.Object,
+            (byte)'[' => JsonTokenKind.Array,
+            (byte)'"' => JsonTokenKind.String,
+            (byte)'t' => JsonTokenKind.True,
+            (byte)'f' => JsonTokenKind.False,
+            (byte)'n' => JsonTokenKind.Null,
+            (byte)'-' => JsonTokenKind.Number,
+            >= (byte)'0' and <= (byte)'9' => JsonTokenKind.Number,
+            _ => JsonTokenKind.Invalid,
+        };
+    }
+
+    internal ReadOnlySpan<byte> ReadNumberBytes() => ReadNumberToken();
+
     private ReadOnlySpan<byte> ReadStringBytesValue()
     {
         SkipWhitespace();
@@ -1023,4 +1047,16 @@ public ref struct JsonReader
     {
         private ContainerFrame _element0;
     }
+}
+
+internal enum JsonTokenKind
+{
+    Invalid,
+    Object,
+    Array,
+    String,
+    Number,
+    True,
+    False,
+    Null,
 }

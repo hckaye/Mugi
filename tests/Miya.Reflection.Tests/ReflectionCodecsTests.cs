@@ -100,6 +100,25 @@ public sealed class ReflectionCodecsTests : IDisposable
     }
 
     [Fact]
+    public void Record_constructor_parameters_enforce_presence_and_honor_defaults()
+    {
+        ReflectionCodecs.Enable();
+
+        var value = JsonRuntime.Deserialize<RuntimeDefault>("{}"u8);
+        var nullable = JsonRuntime.Deserialize<RuntimeNullable>("{\"value\":null}"u8);
+
+        Assert.Equal(new RuntimeDefault(), value);
+        Assert.Null(nullable!.Value);
+        AssertMissingField(() => JsonRuntime.Deserialize<RuntimeRequired>("{}"u8), "id");
+        AssertMissingField(
+            () => JsonRuntime.Deserialize<RuntimeOuter>("{\"inner\":{}}"u8),
+            "id");
+        AssertMissingField(
+            () => JsonRuntime.Deserialize<RuntimeRequired[]>("[{}]"u8),
+            "id");
+    }
+
+    [Fact]
     public void CircularReferencesAreStoppedByConfiguredMaxDepth()
     {
         ReflectionCodecs.Enable();
@@ -141,6 +160,13 @@ public sealed class ReflectionCodecsTests : IDisposable
     }
 
     private static T? RoundTrip<T>(T value) => JsonRuntime.Deserialize<T>(Serialize(value));
+
+    private static void AssertMissingField(Action action, string field)
+    {
+        var exception = Assert.Throws<JsonException>(action);
+        Assert.True(exception.IsInputError);
+        Assert.Contains("'" + field + "'", exception.Message, StringComparison.Ordinal);
+    }
 }
 
 internal enum RuntimeState
@@ -161,6 +187,14 @@ internal sealed record RuntimeRecord(
     DateTime CreatedAt);
 
 internal sealed record NamingPayload(string DisplayName, string URLValue);
+
+internal sealed record RuntimeRequired(string Id, string Name);
+
+internal sealed record RuntimeDefault(int Count = 42, string Label = "default");
+
+internal sealed record RuntimeNullable(string? Value);
+
+internal sealed record RuntimeOuter(RuntimeRequired Inner);
 
 internal sealed class MutablePayload
 {

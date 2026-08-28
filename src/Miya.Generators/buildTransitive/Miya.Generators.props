@@ -8,5 +8,7 @@
     <CompilerVisibleProperty Include="RootNamespace" />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApi" />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApiNamespace" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApiClient" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="MiyaOpenApiClientName" />
   </ItemGroup>
 </Project>

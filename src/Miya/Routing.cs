@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Miya;
 
@@ -226,59 +227,54 @@ internal sealed class Router<TContext>
         "OPTIONS",
     ];
 
-    private readonly RouteEntry<TContext>[] _routes;
-    private readonly Dictionary<string, MethodBuckets> _methods;
-    private readonly MethodBuckets? _allMethods;
+    private readonly TrieNode _root;
     private readonly Handler<TContext> _notFound;
 
     public Router(IReadOnlyList<RouteEntry<TContext>> routes, Handler<TContext> notFound)
     {
-        _routes = [.. routes];
         _notFound = notFound;
-        _methods = new Dictionary<string, MethodBuckets>(StringComparer.Ordinal);
-
-        var builders = new Dictionary<string, MethodBucketBuilder>(StringComparer.Ordinal);
+        var builder = new TrieBuilderNode();
         foreach (var route in routes)
         {
-            if (!builders.TryGetValue(route.Method, out var builder))
-            {
-                builder = new MethodBucketBuilder();
-                builders.Add(route.Method, builder);
-            }
-
             builder.Add(route);
         }
 
-        foreach (var pair in builders)
-        {
-            var buckets = pair.Value.Build();
-            if (pair.Key == AllMethods)
-            {
-                _allMethods = buckets;
-            }
-            else
-            {
-                _methods.Add(pair.Key, buckets);
-            }
-        }
+        _root = builder.Build();
     }
 
     public ValueTask Dispatch(TContext context)
     {
         var path = context.Req.Path;
         Context.ValidatePercentEscapes(path.AsSpan());
-        var segmentCount = CountSegments(path);
+        ValidatePath(path);
         var method = context.Req.Method;
 
         RouteEntry<TContext>? route;
         if (string.Equals(method, "HEAD", StringComparison.Ordinal))
         {
-            route = FindRoute("HEAD", path, segmentCount, context, includeAll: true)
-                ?? FindRoute("GET", path, segmentCount, context, includeAll: false);
+            route = FindRoute("HEAD", path, includeAll: true)
+                ?? FindRoute("GET", path, includeAll: false);
+        }
+        else if (string.Equals(method, "CONNECT", StringComparison.Ordinal))
+        {
+            route = FindRoute("CONNECT", path, includeAll: true);
+            if (route is null)
+            {
+                var extendedConnect = context.Features.Get<IHttpExtendedConnectFeature>();
+                if (extendedConnect?.IsExtendedConnect == true
+                    && string.Equals(
+                        extendedConnect.Protocol,
+                        "websocket",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    // RFC 8441 WebSockets share the endpoint registered for HTTP/1.1 GET.
+                    route = FindRoute("GET", path, includeAll: false);
+                }
+            }
         }
         else
         {
-            route = FindRoute(method, path, segmentCount, context, includeAll: true);
+            route = FindRoute(method, path, includeAll: true);
         }
 
         if (route is not null)
@@ -288,14 +284,14 @@ internal sealed class Router<TContext>
         }
 
         context.ClearRouteParameters();
-        var allowed = GetAllowedMethods(path, context);
-        if (allowed.Count == 0)
+        var allowed = new AllowAccumulator();
+        CollectAllowedMethods(path, ref allowed);
+        if (allowed.IsEmpty)
         {
             return _notFound(context);
         }
 
-        var allowValue = FormatAllow(allowed);
-        context.Header("Allow", allowValue);
+        context.Header("Allow", allowed.Format());
         context.SetEmptyBody();
         if (string.Equals(method, "OPTIONS", StringComparison.Ordinal))
         {
@@ -312,139 +308,109 @@ internal sealed class Router<TContext>
     private RouteEntry<TContext>? FindRoute(
         string method,
         string path,
-        int segmentCount,
-        TContext context,
         bool includeAll)
     {
-        RouteEntry<TContext>? best = null;
-        if (_methods.TryGetValue(method, out var buckets))
+        if (path.Length == 1)
         {
-            best = FindInBuckets(buckets, path, segmentCount, context, best);
+            return _root.FindRoute(method, includeAll);
         }
 
-        if (includeAll && _allMethods is not null)
-        {
-            best = FindInBuckets(_allMethods, path, segmentCount, context, best);
-        }
-
-        return best;
+        return FindRoute(_root, path.AsSpan(), 1, method, includeAll);
     }
 
-    private static RouteEntry<TContext>? FindInBuckets(
-        MethodBuckets buckets,
-        string path,
-        int segmentCount,
-        TContext context,
-        RouteEntry<TContext>? best)
+    private static RouteEntry<TContext>? FindRoute(
+        TrieNode node,
+        ReadOnlySpan<char> path,
+        int position,
+        string method,
+        bool includeAll)
     {
-        if (buckets.Exact.TryGetValue(segmentCount, out var exact))
-        {
-            best = FindBest(exact, path, context, best);
-        }
+        var remaining = path[position..];
+        var slash = remaining.IndexOf('/');
+        var length = slash < 0 ? remaining.Length : slash;
+        var segment = remaining[..length];
+        var hasMore = slash >= 0;
+        var nextPosition = position + length + 1;
 
-        foreach (var wildcard in buckets.Wildcards)
+        var child = node.FindStatic(segment);
+        if (child is not null)
         {
-            if (wildcard.Pattern.SegmentCount <= segmentCount
-                && wildcard.Pattern.TryMatch(path.AsSpan(), context.GetParameterCaptureBuffer(wildcard.Pattern.ParameterNames.Length))
-                && IsHigherPriority(wildcard, best))
+            var route = hasMore
+                ? FindRoute(child, path, nextPosition, method, includeAll)
+                : child.FindRoute(method, includeAll);
+            if (route is not null)
             {
-                best = wildcard;
+                return route;
             }
         }
 
-        return best;
+        child = node.Parameter;
+        if (length > 0 && child is not null)
+        {
+            var route = hasMore
+                ? FindRoute(child, path, nextPosition, method, includeAll)
+                : child.FindRoute(method, includeAll);
+            if (route is not null)
+            {
+                return route;
+            }
+        }
+
+        return node.Wildcard?.FindRoute(method, includeAll);
     }
 
-    private static RouteEntry<TContext>? FindBest(
-        RouteEntry<TContext>[] routes,
-        string path,
-        TContext context,
-        RouteEntry<TContext>? best)
+    private void CollectAllowedMethods(string path, ref AllowAccumulator allowed)
     {
-        foreach (var route in routes)
+        if (path.Length == 1)
         {
-            if (route.Pattern.TryMatch(path.AsSpan(), context.GetParameterCaptureBuffer(route.Pattern.ParameterNames.Length))
-                && IsHigherPriority(route, best))
-            {
-                best = route;
-            }
+            _root.AddAllowedMethods(ref allowed);
+            _root.Wildcard?.AddAllowedMethods(ref allowed);
+            return;
         }
 
-        return best;
+        CollectAllowedMethods(_root, path.AsSpan(), 1, ref allowed);
     }
 
-    private static bool IsHigherPriority(RouteEntry<TContext> candidate, RouteEntry<TContext>? current)
+    private static void CollectAllowedMethods(
+        TrieNode node,
+        ReadOnlySpan<char> path,
+        int position,
+        ref AllowAccumulator allowed)
     {
-        if (current is null)
+        var remaining = path[position..];
+        var slash = remaining.IndexOf('/');
+        var length = slash < 0 ? remaining.Length : slash;
+        var segment = remaining[..length];
+        var hasMore = slash >= 0;
+        var nextPosition = position + length + 1;
+
+        var child = node.FindStatic(segment);
+        if (child is not null)
         {
-            return true;
-        }
-
-        var count = Math.Min(candidate.Pattern.Segments.Length, current.Pattern.Segments.Length);
-        for (var i = 0; i < count; i++)
-        {
-            var left = candidate.Pattern.Segments[i].Kind;
-            var right = current.Pattern.Segments[i].Kind;
-            if (left != right)
+            if (hasMore)
             {
-                return left > right;
+                CollectAllowedMethods(child, path, nextPosition, ref allowed);
             }
-        }
-
-        return candidate.RegistrationOrder < current.RegistrationOrder;
-    }
-
-    private List<string> GetAllowedMethods(string path, TContext context)
-    {
-        var methods = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var route in _routes)
-        {
-            if (route.Method == AllMethods)
+            else
             {
-                continue;
-            }
-
-            if (!route.Pattern.TryMatch(path.AsSpan(), context.GetParameterCaptureBuffer(route.Pattern.ParameterNames.Length)))
-            {
-                continue;
-            }
-
-            methods.Add(route.Method);
-            if (string.Equals(route.Method, "GET", StringComparison.Ordinal))
-            {
-                methods.Add("HEAD");
+                child.AddAllowedMethods(ref allowed);
             }
         }
 
-        if (methods.Count > 0)
+        child = node.Parameter;
+        if (length > 0 && child is not null)
         {
-            methods.Add("OPTIONS");
+            if (hasMore)
+            {
+                CollectAllowedMethods(child, path, nextPosition, ref allowed);
+            }
+            else
+            {
+                child.AddAllowedMethods(ref allowed);
+            }
         }
 
-        return [.. methods];
-    }
-
-    private static string FormatAllow(List<string> methods)
-    {
-        methods.Sort(static (left, right) =>
-        {
-            var leftIndex = Array.IndexOf(StandardMethodOrder, left);
-            var rightIndex = Array.IndexOf(StandardMethodOrder, right);
-            if (leftIndex < 0)
-            {
-                leftIndex = int.MaxValue;
-            }
-
-            if (rightIndex < 0)
-            {
-                rightIndex = int.MaxValue;
-            }
-
-            var comparison = leftIndex.CompareTo(rightIndex);
-            return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
-        });
-
-        return string.Join(", ", methods);
+        node.Wildcard?.AddAllowedMethods(ref allowed);
     }
 
     private static void CaptureParameters(RoutePattern pattern, string path, TContext context)
@@ -458,67 +424,351 @@ internal sealed class Router<TContext>
         context.SetRouteParameters(pattern.ParameterNames, pattern.ParameterNames.Length);
     }
 
-    private static int CountSegments(string path)
+    private static void ValidatePath(string path)
     {
-        if (path == "/")
-        {
-            return 0;
-        }
-
         if (path.Length == 0 || path[0] != '/')
         {
             throw new BadHttpRequestException("The request path must start with '/'.", StatusCodes.Status400BadRequest);
         }
+    }
 
-        var count = 1;
-        foreach (var character in path.AsSpan(1))
+    private static int GetStandardMethodIndex(string method)
+    {
+        for (var i = 0; i < StandardMethodOrder.Length; i++)
         {
-            if (character == '/')
+            if (string.Equals(method, StandardMethodOrder[i], StringComparison.Ordinal))
             {
-                count++;
+                return i;
             }
         }
 
-        return count;
+        return -1;
     }
 
-    private sealed class MethodBucketBuilder
+    private sealed class TrieBuilderNode
     {
-        private readonly Dictionary<int, List<RouteEntry<TContext>>> _exact = new();
-        private readonly List<RouteEntry<TContext>> _wildcards = [];
+        private readonly Dictionary<string, TrieBuilderNode> _static = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, RouteEntry<TContext>> _routes = new(StringComparer.Ordinal);
+        private TrieBuilderNode? _parameter;
+        private TrieBuilderNode? _wildcard;
 
         public void Add(RouteEntry<TContext> route)
         {
-            if (route.Pattern.HasWildcard)
+            var node = this;
+            foreach (var segment in route.Pattern.Segments)
             {
-                _wildcards.Add(route);
-                return;
+                if (segment.Kind == RouteSegmentKind.Static)
+                {
+                    if (!node._static.TryGetValue(segment.Value, out var child))
+                    {
+                        child = new TrieBuilderNode();
+                        node._static.Add(segment.Value, child);
+                    }
+
+                    node = child;
+                }
+                else if (segment.Kind == RouteSegmentKind.Parameter)
+                {
+                    node._parameter ??= new TrieBuilderNode();
+                    node = node._parameter;
+                }
+                else
+                {
+                    node._wildcard ??= new TrieBuilderNode();
+                    node = node._wildcard;
+                }
             }
 
-            if (!_exact.TryGetValue(route.Pattern.SegmentCount, out var routes))
+            if (!node._routes.TryGetValue(route.Method, out var existing)
+                || route.RegistrationOrder < existing.RegistrationOrder)
             {
-                routes = [];
-                _exact.Add(route.Pattern.SegmentCount, routes);
+                node._routes[route.Method] = route;
             }
-
-            routes.Add(route);
         }
 
-        public MethodBuckets Build()
+        public TrieNode Build()
         {
-            var exact = new Dictionary<int, RouteEntry<TContext>[]>(_exact.Count);
-            foreach (var pair in _exact)
+            var staticChildren = new StaticEdge[_static.Count];
+            var staticIndex = 0;
+            foreach (var pair in _static)
             {
-                exact.Add(pair.Key, [.. pair.Value]);
+                staticChildren[staticIndex++] = new StaticEdge(pair.Key, pair.Value.Build());
             }
 
-            return new MethodBuckets(exact, [.. _wildcards]);
+            Array.Sort(
+                staticChildren,
+                static (left, right) => StringComparer.Ordinal.Compare(left.Segment, right.Segment));
+
+            RouteEntry<TContext>? allRoute = null;
+            var methodRoutes = new MethodRoute[_routes.Count];
+            var methodIndex = 0;
+            uint allowMask = 0;
+            var customMethodCount = 0;
+            foreach (var pair in _routes)
+            {
+                if (string.Equals(pair.Key, AllMethods, StringComparison.Ordinal))
+                {
+                    allRoute = pair.Value;
+                    continue;
+                }
+
+                methodRoutes[methodIndex++] = new MethodRoute(pair.Key, pair.Value);
+                var standardIndex = GetStandardMethodIndex(pair.Key);
+                if (standardIndex >= 0)
+                {
+                    allowMask |= 1u << standardIndex;
+                }
+                else
+                {
+                    customMethodCount++;
+                }
+
+                if (string.Equals(pair.Key, "GET", StringComparison.Ordinal))
+                {
+                    allowMask |= 1u << 1;
+                }
+            }
+
+            if (methodIndex > 0)
+            {
+                allowMask |= 1u << 6;
+            }
+
+            if (methodIndex != methodRoutes.Length)
+            {
+                Array.Resize(ref methodRoutes, methodIndex);
+            }
+
+            Array.Sort(
+                methodRoutes,
+                static (left, right) => StringComparer.Ordinal.Compare(left.Method, right.Method));
+
+            var customMethods = customMethodCount == 0 ? [] : new string[customMethodCount];
+            var customIndex = 0;
+            for (var i = 0; i < methodRoutes.Length; i++)
+            {
+                if (GetStandardMethodIndex(methodRoutes[i].Method) < 0)
+                {
+                    customMethods[customIndex++] = methodRoutes[i].Method;
+                }
+            }
+
+            return new TrieNode(
+                staticChildren,
+                _parameter?.Build(),
+                _wildcard?.Build(),
+                methodRoutes,
+                allRoute,
+                allowMask,
+                customMethods);
         }
     }
 
-    private sealed record MethodBuckets(
-        Dictionary<int, RouteEntry<TContext>[]> Exact,
-        RouteEntry<TContext>[] Wildcards);
+    private sealed class TrieNode
+    {
+        private readonly StaticEdge[] _static;
+        private readonly MethodRoute[] _methodRoutes;
+        private readonly RouteEntry<TContext>? _allRoute;
+        private readonly uint _allowMask;
+        private readonly string[] _customMethods;
+
+        public TrieNode(
+            StaticEdge[] staticChildren,
+            TrieNode? parameter,
+            TrieNode? wildcard,
+            MethodRoute[] methodRoutes,
+            RouteEntry<TContext>? allRoute,
+            uint allowMask,
+            string[] customMethods)
+        {
+            _static = staticChildren;
+            Parameter = parameter;
+            Wildcard = wildcard;
+            _methodRoutes = methodRoutes;
+            _allRoute = allRoute;
+            _allowMask = allowMask;
+            _customMethods = customMethods;
+        }
+
+        public TrieNode? Parameter { get; }
+
+        public TrieNode? Wildcard { get; }
+
+        public TrieNode? FindStatic(ReadOnlySpan<char> segment)
+        {
+            var lower = 0;
+            var upper = _static.Length - 1;
+            while (lower <= upper)
+            {
+                var middle = lower + ((upper - lower) / 2);
+                var comparison = segment.SequenceCompareTo(_static[middle].Segment.AsSpan());
+                if (comparison == 0)
+                {
+                    return _static[middle].Node;
+                }
+
+                if (comparison < 0)
+                {
+                    upper = middle - 1;
+                }
+                else
+                {
+                    lower = middle + 1;
+                }
+            }
+
+            return null;
+        }
+
+        public RouteEntry<TContext>? FindRoute(string method, bool includeAll)
+        {
+            RouteEntry<TContext>? methodRoute = null;
+            var lower = 0;
+            var upper = _methodRoutes.Length - 1;
+            while (lower <= upper)
+            {
+                var middle = lower + ((upper - lower) / 2);
+                var comparison = StringComparer.Ordinal.Compare(method, _methodRoutes[middle].Method);
+                if (comparison == 0)
+                {
+                    methodRoute = _methodRoutes[middle].Route;
+                    break;
+                }
+
+                if (comparison < 0)
+                {
+                    upper = middle - 1;
+                }
+                else
+                {
+                    lower = middle + 1;
+                }
+            }
+
+            if (!includeAll || _allRoute is null)
+            {
+                return methodRoute;
+            }
+
+            return methodRoute is null || _allRoute.RegistrationOrder < methodRoute.RegistrationOrder
+                ? _allRoute
+                : methodRoute;
+        }
+
+        public void AddAllowedMethods(ref AllowAccumulator allowed) =>
+            allowed.Add(_allowMask, _customMethods);
+    }
+
+    private struct AllowAccumulator
+    {
+        private uint _standardMask;
+        private List<string>? _customMethods;
+
+        public readonly bool IsEmpty => _standardMask == 0 && _customMethods is null;
+
+        public void Add(uint standardMask, string[] customMethods)
+        {
+            _standardMask |= standardMask;
+            for (var i = 0; i < customMethods.Length; i++)
+            {
+                AddCustom(customMethods[i]);
+            }
+        }
+
+        public string Format()
+        {
+            _customMethods?.Sort(StringComparer.Ordinal);
+            var methodCount = 0;
+            var length = 0;
+            for (var i = 0; i < StandardMethodOrder.Length; i++)
+            {
+                if ((_standardMask & (1u << i)) == 0)
+                {
+                    continue;
+                }
+
+                methodCount++;
+                length += StandardMethodOrder[i].Length;
+            }
+
+            if (_customMethods is not null)
+            {
+                methodCount += _customMethods.Count;
+                for (var i = 0; i < _customMethods.Count; i++)
+                {
+                    length += _customMethods[i].Length;
+                }
+            }
+
+            length += (methodCount - 1) * 2;
+            return string.Create(
+                length,
+                this,
+                static (destination, state) => state.WriteTo(destination));
+        }
+
+        private readonly void WriteTo(Span<char> destination)
+        {
+            var position = 0;
+            var hasMethod = false;
+            for (var i = 0; i < StandardMethodOrder.Length; i++)
+            {
+                if ((_standardMask & (1u << i)) == 0)
+                {
+                    continue;
+                }
+
+                WriteMethod(StandardMethodOrder[i], destination, ref position, ref hasMethod);
+            }
+
+            if (_customMethods is null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _customMethods.Count; i++)
+            {
+                WriteMethod(_customMethods[i], destination, ref position, ref hasMethod);
+            }
+        }
+
+        private void AddCustom(string method)
+        {
+            if (_customMethods is not null)
+            {
+                for (var i = 0; i < _customMethods.Count; i++)
+                {
+                    if (string.Equals(_customMethods[i], method, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+                }
+            }
+
+            (_customMethods ??= []).Add(method);
+        }
+
+        private static void WriteMethod(
+            string method,
+            Span<char> destination,
+            ref int position,
+            ref bool hasMethod)
+        {
+            if (hasMethod)
+            {
+                destination[position++] = ',';
+                destination[position++] = ' ';
+            }
+
+            method.AsSpan().CopyTo(destination[position..]);
+            position += method.Length;
+            hasMethod = true;
+        }
+    }
+
+    private readonly record struct StaticEdge(string Segment, TrieNode Node);
+
+    private readonly record struct MethodRoute(string Method, RouteEntry<TContext> Route);
 }
 
 internal sealed record MiddlewareRegistration<TContext>(
