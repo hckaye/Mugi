@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "hckaye",
+  "classifications": ["Web", "API", "Mugi"],
+  "identity": "Mugi.App.CSharp",
+  "name": "Mugi web application",
+  "shortName": "mugi",
+  "description": "A minimal Mugi web application with routing, JSON responses, and typed input validation.",
+  "sourceName": "Mugi.App",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  }
+}

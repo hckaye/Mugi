@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishAot>true</PublishAot>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Mugi.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mugi" Version="0.1.2" />
+    <PackageReference Include="Mugi.Schema" Version="0.1.2" />
+    <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  </ItemGroup>
+
+</Project>

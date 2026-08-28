@@ -48,7 +48,13 @@ jobs:
             src/Mugi.Jwt/Mugi.Jwt.csproj
             src/Mugi.Generators/Mugi.Generators.csproj
             src/Mugi.Gen/Mugi.Gen.csproj
+            src/Mugi.Templates/Mugi.Templates.csproj
           )
+
+          # The template content references the Mugi packages by version; align it
+          # with the version being released before packing.
+          sed -E -i "s/(Include=\"Mugi[^\"]*\" Version=\")[^\"]+(\")/\1${PACKAGE_VERSION}\2/" \
+            src/Mugi.Templates/templates/mugi/Mugi.App.csproj
 
           for project in "${projects[@]}"; do
             dotnet pack "$project" \

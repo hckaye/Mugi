@@ -18,7 +18,16 @@ Mugi is built for NativeAOT. At runtime it uses no reflection, no assembly scann
 
 Mugi's packages target `net9.0` and run on .NET 9 or later. Building an app needs the .NET 9 SDK or newer, because the generator uses stable C# interceptors that shipped in that release.
 
-Add the runtime package and the generator package. Add `Mugi.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
+The quickest start is the project template. It creates a small app with the packages and settings below already in place:
+
+```sh
+dotnet new install Mugi.Templates
+dotnet new mugi -n HelloMugi
+cd HelloMugi
+dotnet run
+```
+
+To set up a project by hand instead, add the runtime package and the generator package. Add `Mugi.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
 
 ```xml
 <PropertyGroup>
