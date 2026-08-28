@@ -2,6 +2,14 @@
 
 [English](README.md) | 日本語
 
+[![Miya](https://img.shields.io/nuget/v/Miya?label=Miya)](https://www.nuget.org/packages/Miya)
+[![Miya.Json](https://img.shields.io/nuget/v/Miya.Json?label=Miya.Json)](https://www.nuget.org/packages/Miya.Json)
+[![Miya.Schema](https://img.shields.io/nuget/v/Miya.Schema?label=Miya.Schema)](https://www.nuget.org/packages/Miya.Schema)
+[![Miya.Reflection](https://img.shields.io/nuget/v/Miya.Reflection?label=Miya.Reflection)](https://www.nuget.org/packages/Miya.Reflection)
+[![Miya.Jwt](https://img.shields.io/nuget/v/Miya.Jwt?label=Miya.Jwt)](https://www.nuget.org/packages/Miya.Jwt)
+[![Miya.Generators](https://img.shields.io/nuget/v/Miya.Generators?label=Miya.Generators)](https://www.nuget.org/packages/Miya.Generators)
+[![Miya.Gen](https://img.shields.io/nuget/v/Miya.Gen?label=Miya.Gen)](https://www.nuget.org/packages/Miya.Gen)
+
 Miya は高速でシンプルな .NET 向け Web アプリケーションフレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストのルーティング、ミドルウェア、型付き入力のバインドと検証を行い、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行います。`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
 
 Miya は NativeAOT のために作られています。実行時にリフレクション、アセンブリスキャン、実行時コード生成を一切使わないので、publish したアプリは数ミリ秒で起動し、小さな単一バイナリになります。ルーティング、JSON、型付き入力のバインダーはソースジェネレーターがコンパイル時に用意します。ジェネレーターを自分で呼ぶことはなく、パッケージを参照するだけで動きます。

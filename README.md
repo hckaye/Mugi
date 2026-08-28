@@ -2,6 +2,14 @@
 
 English | [日本語](README.ja.md)
 
+[![Miya](https://img.shields.io/nuget/v/Miya?label=Miya)](https://www.nuget.org/packages/Miya)
+[![Miya.Json](https://img.shields.io/nuget/v/Miya.Json?label=Miya.Json)](https://www.nuget.org/packages/Miya.Json)
+[![Miya.Schema](https://img.shields.io/nuget/v/Miya.Schema?label=Miya.Schema)](https://www.nuget.org/packages/Miya.Schema)
+[![Miya.Reflection](https://img.shields.io/nuget/v/Miya.Reflection?label=Miya.Reflection)](https://www.nuget.org/packages/Miya.Reflection)
+[![Miya.Jwt](https://img.shields.io/nuget/v/Miya.Jwt?label=Miya.Jwt)](https://www.nuget.org/packages/Miya.Jwt)
+[![Miya.Generators](https://img.shields.io/nuget/v/Miya.Generators?label=Miya.Generators)](https://www.nuget.org/packages/Miya.Generators)
+[![Miya.Gen](https://img.shields.io/nuget/v/Miya.Gen?label=Miya.Gen)](https://www.nuget.org/packages/Miya.Gen)
+
 Miya is a fast, simple web application framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, route requests, run middleware, bind and validate typed input, and read the request and write the response through one context object. It runs on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
 Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing, JSON, and typed input binders are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
