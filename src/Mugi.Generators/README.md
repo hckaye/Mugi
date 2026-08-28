@@ -18,8 +18,8 @@ Reference it next to Mugi; building needs the .NET 9 SDK or newer:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Mugi" Version="0.1.2" />
-  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  <PackageReference Include="Mugi" Version="0.1.3" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.3" />
 </ItemGroup>
 ```
 

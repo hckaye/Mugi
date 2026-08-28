@@ -6,7 +6,7 @@ Mugi.Reflection is an opt-in fallback for the [Mugi](https://www.nuget.org/packa
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Mugi.Reflection" Version="0.1.2" />
+  <PackageReference Include="Mugi.Reflection" Version="0.1.3" />
 </ItemGroup>
 ```
 

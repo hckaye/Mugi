@@ -9,6 +9,7 @@ English | [日本語](README.ja.md)
 [![Mugi.Jwt](https://img.shields.io/nuget/v/Mugi.Jwt?label=Mugi.Jwt)](https://www.nuget.org/packages/Mugi.Jwt)
 [![Mugi.Generators](https://img.shields.io/nuget/v/Mugi.Generators?label=Mugi.Generators)](https://www.nuget.org/packages/Mugi.Generators)
 [![Mugi.Gen](https://img.shields.io/nuget/v/Mugi.Gen?label=Mugi.Gen)](https://www.nuget.org/packages/Mugi.Gen)
+[![Mugi.Templates](https://img.shields.io/nuget/v/Mugi.Templates?label=Mugi.Templates)](https://www.nuget.org/packages/Mugi.Templates)
 
 Mugi is a fast, simple web application framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, route requests, run middleware, bind and validate typed input, and read the request and write the response through one context object. It runs on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
@@ -37,9 +38,9 @@ To set up a project by hand instead, add the runtime package and the generator p
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Mugi" Version="0.1.2" />
-  <PackageReference Include="Mugi.Schema" Version="0.1.2" />
-  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  <PackageReference Include="Mugi" Version="0.1.3" />
+  <PackageReference Include="Mugi.Schema" Version="0.1.3" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.3" />
 </ItemGroup>
 ```
 
@@ -702,7 +703,7 @@ As a build-time optimization, Mugi replaces the `c.Json` and route calls it reco
 Some build setups cannot run compiler-integrated source generators. `mugi-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
 
 ```sh
-dotnet tool install --global Mugi.Gen --version 0.1.2
+dotnet tool install --global Mugi.Gen --version 0.1.3
 dotnet build MyApp.csproj
 mugi-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
@@ -721,7 +722,7 @@ dotnet run --project src/Mugi.Gen -- \
 Routing and text responses already work without generated source. When neither the source generator nor `mugi-gen` is available, add the opt-in `Mugi.Reflection` package to create JSON codecs from public properties and constructors at runtime.
 
 ```xml
-<PackageReference Include="Mugi.Reflection" Version="0.1.2" />
+<PackageReference Include="Mugi.Reflection" Version="0.1.3" />
 ```
 
 Enable the fallback once during startup:
@@ -802,7 +803,7 @@ mugi-gen import --input api/openapi.json --output Generated --namespace MyApp.Ap
 The `Mugi.Jwt` package signs and verifies compact JWTs without reflection. It supports HS256, RS256, and ES256. `Jwt.Sign` creates a token with the algorithm selected by a `JwtKey`, and `Jwt.Verify` checks the signature and registered claims, then returns a `JwtResult` rather than throwing for an invalid token.
 
 ```xml
-<PackageReference Include="Mugi.Jwt" Version="0.1.2" />
+<PackageReference Include="Mugi.Jwt" Version="0.1.3" />
 ```
 
 ```csharp

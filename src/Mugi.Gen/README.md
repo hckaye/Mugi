@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-dotnet tool install --global Mugi.Gen --version 0.1.2
+dotnet tool install --global Mugi.Gen --version 0.1.3
 ```
 
 ## Generate source without the compiler generator

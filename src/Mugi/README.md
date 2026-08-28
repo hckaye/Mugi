@@ -8,8 +8,8 @@ Mugi is built for NativeAOT. At runtime it uses no reflection, no assembly scann
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Mugi" Version="0.1.2" />
-  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  <PackageReference Include="Mugi" Version="0.1.3" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.3" />
 </ItemGroup>
 ```
 

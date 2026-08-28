@@ -6,9 +6,9 @@ Mugi.Schema adds typed request input to the [Mugi](https://www.nuget.org/package
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Mugi" Version="0.1.2" />
-  <PackageReference Include="Mugi.Schema" Version="0.1.2" />
-  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  <PackageReference Include="Mugi" Version="0.1.3" />
+  <PackageReference Include="Mugi.Schema" Version="0.1.3" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.3" />
 </ItemGroup>
 ```
 

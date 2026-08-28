@@ -9,6 +9,7 @@
 [![Mugi.Jwt](https://img.shields.io/nuget/v/Mugi.Jwt?label=Mugi.Jwt)](https://www.nuget.org/packages/Mugi.Jwt)
 [![Mugi.Generators](https://img.shields.io/nuget/v/Mugi.Generators?label=Mugi.Generators)](https://www.nuget.org/packages/Mugi.Generators)
 [![Mugi.Gen](https://img.shields.io/nuget/v/Mugi.Gen?label=Mugi.Gen)](https://www.nuget.org/packages/Mugi.Gen)
+[![Mugi.Templates](https://img.shields.io/nuget/v/Mugi.Templates?label=Mugi.Templates)](https://www.nuget.org/packages/Mugi.Templates)
 
 Mugi は高速でシンプルな .NET 向け Web アプリケーションフレームワークです。大きなフレームワーク群ではなく、無駄のないモダンな API を提供します。ハンドラーはラムダで書き、リクエストのルーティング、ミドルウェア、型付き入力のバインドと検証を行い、リクエストの読み取りとレスポンスの書き込みは 1 つのコンテキストオブジェクトで行います。`WebApplication`、Generic Host、DI コンテナなしで Kestrel の上で動きます。
 
@@ -37,9 +38,9 @@ dotnet run
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Mugi" Version="0.1.2" />
-  <PackageReference Include="Mugi.Schema" Version="0.1.2" />
-  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
+  <PackageReference Include="Mugi" Version="0.1.3" />
+  <PackageReference Include="Mugi.Schema" Version="0.1.3" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.3" />
 </ItemGroup>
 ```
 
@@ -702,7 +703,7 @@ NaN と Infinity は既定で拒否します。`JsonOptions` は、時間のか�
 ビルド構成によっては、コンパイラ統合のソースジェネレーターを動かせません。`mugi-gen` は、同じ JSON とルーティングのコードを通常の `.cs` ファイルとして、ビルドの一手順で生成します。interceptors の最適化は出力しないので、直接呼び出しによる高速化だけがなくなります。挙動は同じです。
 
 ```sh
-dotnet tool install --global Mugi.Gen --version 0.1.2
+dotnet tool install --global Mugi.Gen --version 0.1.3
 dotnet build MyApp.csproj
 mugi-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
@@ -721,7 +722,7 @@ dotnet run --project src/Mugi.Gen -- \
 ルーティングとテキストレスポンスは、生成済みソースがなくても動きます。ソースジェネレーターと `mugi-gen` のどちらも使えない環境で JSON を扱う場合は、opt-in の `Mugi.Reflection` パッケージを追加します。このパッケージは public プロパティとコンストラクターから実行時に codec を作ります。
 
 ```xml
-<PackageReference Include="Mugi.Reflection" Version="0.1.2" />
+<PackageReference Include="Mugi.Reflection" Version="0.1.3" />
 ```
 
 起動時にフォールバックを有効にします。
@@ -802,7 +803,7 @@ mugi-gen import --input api/openapi.json --output Generated --namespace MyApp.Ap
 `Mugi.Jwt` パッケージは reflection を使わずに compact JWT を署名・検証します。HS256、RS256、ES256 に対応します。`Jwt.Sign` は `JwtKey` が選んだアルゴリズムで token を作り、`Jwt.Verify` は署名と登録済み claim を検証してから、不正な token では例外を投げず `JwtResult` を返します。
 
 ```xml
-<PackageReference Include="Mugi.Jwt" Version="0.1.2" />
+<PackageReference Include="Mugi.Jwt" Version="0.1.3" />
 ```
 
 ```csharp
