@@ -67,11 +67,24 @@ jobs:
       - name: Push packages
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.value }}
         shell: bash
         run: |
+          # --skip-duplicate is intentionally not used: nuget.org answers 409 both for
+          # a duplicate version and for a reserved package ID, and --skip-duplicate
+          # would silently treat the reservation error as success. Duplicates from a
+          # re-run are skipped by asking the registry first instead.
           for package in artifacts/*.nupkg; do
+            name=$(basename "$package" .nupkg)
+            id="${name%.$PACKAGE_VERSION}"
+            lower_id=$(echo "$id" | tr '[:upper:]' '[:lower:]')
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api.nuget.org/v3-flatcontainer/$lower_id/$PACKAGE_VERSION/$lower_id.$PACKAGE_VERSION.nupkg")
+            if [ "$status" = "200" ]; then
+              echo "$id $PACKAGE_VERSION is already on nuget.org; skipping."
+              continue
+            fi
             dotnet nuget push "$package" \
               --api-key "$NUGET_API_KEY" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
+              --source https://api.nuget.org/v3/index.json
           done
