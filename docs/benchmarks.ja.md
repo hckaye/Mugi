@@ -19,15 +19,16 @@
 
 `benchmarks/Miya.LoadBench` は、Miya サーバーと等価な ASP.NET Core Minimal API サーバーを 1 つずつ起動し、loopback の HTTP/1.1 で `HttpClient` の負荷クライアント（128 並行、3 秒のウォームアップ、10 秒の計測）でそれぞれに負荷をかけます。両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使い、コンソールログは無効、アプリケーション固有のサービスは未登録です。
 
-3 つのエンドポイントすべてで、Miya サーバーはピーク作業セットが小さく、リクエストあたりの割り当ても少ない結果でした。ピーク作業セットの中央値は 22.7 から 26.0 MiB 小さく、リクエストあたりの割り当ては 38% から 90% 少なくなりました。
+スループットはどのエンドポイントでも両者の差がおよそ 1〜3% で、共通の Kestrel 転送層と整合します。Miya はピーク作業セットが約 20 MiB 小さく、リクエストあたりの割り当ても少ない結果でした。表は 3 反復の中央値です。
 
-| エンドポイント | ピーク作業セット（Miya / ASP.NET Core） | リクエストあたりの割り当て（Miya / ASP.NET Core） |
-| --- | ---: | ---: |
-| plaintext | 73.0 / 99.0 MiB | 104 / 1,016 B |
-| JSON GET | 74.5 / 98.5 MiB | 168 / 384 B |
-| JSON POST | 78.1 / 100.8 MiB | 400 / 648 B |
-
-スループットはまだ計測していません。両フレームワークとも Kestrel の上で動くので、転送層が共通のボトルネックであり、スループットはほぼ同じになるはずです。下のコマンドで、アイドル状態のホスト上で比較を実行できます。
+| エンドポイント | フレームワーク | スループット (req/s) | p99 | ピーク作業セット | 1 リクエストあたりの割り当て |
+| --- | --- | ---: | ---: | ---: | ---: |
+| plaintext | Miya | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
+| plaintext | ASP.NET Core | 174,897 | 1.960 ms | 97.8 MiB | 1,016 B |
+| JSON GET | Miya | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
+| JSON GET | ASP.NET Core | 175,505 | 1.967 ms | 98.4 MiB | 384 B |
+| JSON POST | Miya | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
+| JSON POST | ASP.NET Core | 166,704 | 2.048 ms | 100.5 MiB | 648 B |
 
 リクエストあたりの割り当ては、サーバーの `GC.GetTotalAllocatedBytes` の計測区間での差分をリクエスト数で割った値です。ピーク作業セットは、サーバーの実行中に 10 ms 間隔で取得した `WorkingSet64` の最大値です。
 

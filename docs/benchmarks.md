@@ -19,15 +19,16 @@ The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389
 
 `benchmarks/Miya.LoadBench` starts a Miya server and an equivalent ASP.NET Core Minimal API server one at a time and drives each with an `HttpClient` load client over HTTP/1.1 loopback (128 concurrent workers, a 3-second warmup, and a 10-second measurement). Both servers return the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names, with console logging removed and no application services registered.
 
-Across all three endpoints the Miya server used a lower peak working set and allocated less per request. The median peak working set was 22.7 to 26.0 MiB lower, and the per-request allocation was 38 to 90 percent lower.
+Throughput was within about 1 to 3 percent between the two on every endpoint, matching the shared Kestrel transport. Miya used a peak working set about 20 MiB lower and allocated less per request. The table is the median of three iterations.
 
-| Endpoint | Peak working set, Miya / ASP.NET Core | Allocated per request, Miya / ASP.NET Core |
-| --- | ---: | ---: |
-| plaintext | 73.0 / 99.0 MiB | 104 / 1,016 B |
-| JSON GET | 74.5 / 98.5 MiB | 168 / 384 B |
-| JSON POST | 78.1 / 100.8 MiB | 400 / 648 B |
-
-Throughput is not measured here yet. Both frameworks run on Kestrel, so the transport is the shared bottleneck and throughput is expected to be about the same. The command below runs the comparison on an idle host.
+| Endpoint | Framework | Throughput (req/s) | p99 | Peak working set | Allocated/request |
+| --- | --- | ---: | ---: | ---: | ---: |
+| plaintext | Miya | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
+| plaintext | ASP.NET Core | 174,897 | 1.960 ms | 97.8 MiB | 1,016 B |
+| JSON GET | Miya | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
+| JSON GET | ASP.NET Core | 175,505 | 1.967 ms | 98.4 MiB | 384 B |
+| JSON POST | Miya | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
+| JSON POST | ASP.NET Core | 166,704 | 2.048 ms | 100.5 MiB | 648 B |
 
 Per-request allocation is the server's `GC.GetTotalAllocatedBytes` difference across the measured interval divided by the request count. The peak working set is the maximum of `WorkingSet64` sampled every 10 ms while the server ran.
 
