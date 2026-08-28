@@ -44,6 +44,8 @@ jobs:
             src/Miya/Miya.csproj
             src/Miya.Json/Miya.Json.csproj
             src/Miya.Schema/Miya.Schema.csproj
+            src/Miya.Reflection/Miya.Reflection.csproj
+            src/Miya.Jwt/Miya.Jwt.csproj
             src/Miya.Generators/Miya.Generators.csproj
             src/Miya.Gen/Miya.Gen.csproj
           )
