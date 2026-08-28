@@ -103,7 +103,7 @@ public sealed class CliSmokeTests
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(output));
             Assert.Equal("3.1.0", document.RootElement.GetProperty("openapi").GetString());
             Assert.Equal("CliSmoke", document.RootElement.GetProperty("info").GetProperty("title").GetString());
-            Assert.Equal("0.1.0", document.RootElement.GetProperty("info").GetProperty("version").GetString());
+            Assert.Equal("1.2.3", document.RootElement.GetProperty("info").GetProperty("version").GetString());
             Assert.True(document.RootElement.GetProperty("paths").TryGetProperty("/cli/{id}", out _));
             Assert.True(document.RootElement.TryGetProperty("components", out _));
         }
