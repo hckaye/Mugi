@@ -21,6 +21,6 @@ curl "http://127.0.0.1:3000/search/1?Query=mugi&Limit=5"
 
 ## What the template creates
 
-A single-file Mugi application with three routes: a text response, a JSON response with a route parameter, and a typed input route validated by `Mugi.Schema`. The project references `Mugi`, `Mugi.Schema`, and `Mugi.Generators`, targets `net9.0`, and has `PublishAot` enabled, so `dotnet publish -c Release` produces a self-contained NativeAOT binary.
+A single-file Mugi application with three routes: a text response, a JSON response with a route parameter, and a typed input route validated by `Mugi.Schema`. The project references `Mugi`, `Mugi.Schema`, and `Mugi.Generators`, targets `net10.0`, and has `PublishAot` enabled, so `dotnet publish -c Release` produces a self-contained NativeAOT binary.
 
-Building needs the .NET 9 SDK or newer. Full documentation is at [github.com/hckaye/Mugi](https://github.com/hckaye/Mugi).
+Building needs the .NET 10 SDK or newer. Full documentation is at [github.com/hckaye/Mugi](https://github.com/hckaye/Mugi).
