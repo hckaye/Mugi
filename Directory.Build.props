@@ -6,16 +6,18 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace Condition="'$(RootNamespace)' == ''">$(MSBuildProjectName)</RootNamespace>
     <Authors>hckaye</Authors>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/hckaye/Miya</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/hckaye/Miya</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeSource>$(MSBuildThisFileDirectory)README.md</PackageReadmeSource>
+    <PackageReadmeSource Condition="Exists('$(MSBuildProjectDirectory)/README.md')">$(MSBuildProjectDirectory)/README.md</PackageReadmeSource>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)README.md"
+    <None Include="$(PackageReadmeSource)"
           Pack="true"
           PackagePath=""
           Visible="false" />

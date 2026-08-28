@@ -28,9 +28,9 @@ Miya のパッケージは `net9.0` を対象にし、.NET 9 以降で動きま�
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Miya" Version="0.1.0" />
-  <PackageReference Include="Miya.Schema" Version="0.1.0" />
-  <PackageReference Include="Miya.Generators" Version="0.1.0" />
+  <PackageReference Include="Miya" Version="0.1.1" />
+  <PackageReference Include="Miya.Schema" Version="0.1.1" />
+  <PackageReference Include="Miya.Generators" Version="0.1.1" />
 </ItemGroup>
 ```
 
@@ -693,7 +693,7 @@ NaN と Infinity は既定で拒否します。`JsonOptions` は、時間のか�
 ビルド構成によっては、コンパイラ統合のソースジェネレーターを動かせません。`miya-gen` は、同じ JSON とルーティングのコードを通常の `.cs` ファイルとして、ビルドの一手順で生成します。interceptors の最適化は出力しないので、直接呼び出しによる高速化だけがなくなります。挙動は同じです。
 
 ```sh
-dotnet tool install --global Miya.Gen --version 0.1.0
+dotnet tool install --global Miya.Gen --version 0.1.1
 dotnet build MyApp.csproj
 miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
@@ -712,7 +712,7 @@ dotnet run --project src/Miya.Gen -- \
 ルーティングとテキストレスポンスは、生成済みソースがなくても動きます。ソースジェネレーターと `miya-gen` のどちらも使えない環境で JSON を扱う場合は、opt-in の `Miya.Reflection` パッケージを追加します。このパッケージは public プロパティとコンストラクターから実行時に codec を作ります。
 
 ```xml
-<PackageReference Include="Miya.Reflection" Version="0.1.0" />
+<PackageReference Include="Miya.Reflection" Version="0.1.1" />
 ```
 
 起動時にフォールバックを有効にします。
@@ -793,7 +793,7 @@ miya-gen import --input api/openapi.json --output Generated --namespace MyApp.Ap
 `Miya.Jwt` パッケージは reflection を使わずに compact JWT を署名・検証します。HS256、RS256、ES256 に対応します。`Jwt.Sign` は `JwtKey` が選んだアルゴリズムで token を作り、`Jwt.Verify` は署名と登録済み claim を検証してから、不正な token では例外を投げず `JwtResult` を返します。
 
 ```xml
-<PackageReference Include="Miya.Jwt" Version="0.1.0" />
+<PackageReference Include="Miya.Jwt" Version="0.1.1" />
 ```
 
 ```csharp

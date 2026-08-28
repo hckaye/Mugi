@@ -28,9 +28,9 @@ Add the runtime package and the generator package. Add `Miya.Schema` when the ap
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Miya" Version="0.1.0" />
-  <PackageReference Include="Miya.Schema" Version="0.1.0" />
-  <PackageReference Include="Miya.Generators" Version="0.1.0" />
+  <PackageReference Include="Miya" Version="0.1.1" />
+  <PackageReference Include="Miya.Schema" Version="0.1.1" />
+  <PackageReference Include="Miya.Generators" Version="0.1.1" />
 </ItemGroup>
 ```
 
@@ -693,7 +693,7 @@ As a build-time optimization, Miya replaces the `c.Json` and route calls it reco
 Some build setups cannot run compiler-integrated source generators. `miya-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
 
 ```sh
-dotnet tool install --global Miya.Gen --version 0.1.0
+dotnet tool install --global Miya.Gen --version 0.1.1
 dotnet build MyApp.csproj
 miya-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
@@ -712,7 +712,7 @@ dotnet run --project src/Miya.Gen -- \
 Routing and text responses already work without generated source. When neither the source generator nor `miya-gen` is available, add the opt-in `Miya.Reflection` package to create JSON codecs from public properties and constructors at runtime.
 
 ```xml
-<PackageReference Include="Miya.Reflection" Version="0.1.0" />
+<PackageReference Include="Miya.Reflection" Version="0.1.1" />
 ```
 
 Enable the fallback once during startup:
@@ -793,7 +793,7 @@ miya-gen import --input api/openapi.json --output Generated --namespace MyApp.Ap
 The `Miya.Jwt` package signs and verifies compact JWTs without reflection. It supports HS256, RS256, and ES256. `Jwt.Sign` creates a token with the algorithm selected by a `JwtKey`, and `Jwt.Verify` checks the signature and registered claims, then returns a `JwtResult` rather than throwing for an invalid token.
 
 ```xml
-<PackageReference Include="Miya.Jwt" Version="0.1.0" />
+<PackageReference Include="Miya.Jwt" Version="0.1.1" />
 ```
 
 ```csharp
