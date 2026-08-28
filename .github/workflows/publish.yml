@@ -22,13 +22,13 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore Miya.slnx
+        run: dotnet restore Mugi.slnx
 
       - name: Build
-        run: dotnet build Miya.slnx -c Release --no-restore
+        run: dotnet build Mugi.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test Miya.slnx -c Release --no-build --no-restore
+        run: dotnet test Mugi.slnx -c Release --no-build --no-restore
 
       - name: Determine package version
         id: version
@@ -41,13 +41,13 @@ jobs:
         shell: bash
         run: |
           projects=(
-            src/Miya/Miya.csproj
-            src/Miya.Json/Miya.Json.csproj
-            src/Miya.Schema/Miya.Schema.csproj
-            src/Miya.Reflection/Miya.Reflection.csproj
-            src/Miya.Jwt/Miya.Jwt.csproj
-            src/Miya.Generators/Miya.Generators.csproj
-            src/Miya.Gen/Miya.Gen.csproj
+            src/Mugi/Mugi.csproj
+            src/Mugi.Json/Mugi.Json.csproj
+            src/Mugi.Schema/Mugi.Schema.csproj
+            src/Mugi.Reflection/Mugi.Reflection.csproj
+            src/Mugi.Jwt/Mugi.Jwt.csproj
+            src/Mugi.Generators/Mugi.Generators.csproj
+            src/Mugi.Gen/Mugi.Gen.csproj
           )
 
           for project in "${projects[@]}"; do

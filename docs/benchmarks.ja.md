@@ -17,17 +17,17 @@
 
 ## ASP.NET Core とのメモリ・スループット比較
 
-`benchmarks/Miya.LoadBench` は、Miya サーバーと等価な ASP.NET Core Minimal API サーバーを 1 つずつ起動し、loopback の HTTP/1.1 で `HttpClient` の負荷クライアント（128 並行、3 秒のウォームアップ、10 秒の計測）でそれぞれに負荷をかけます。両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使い、コンソールログは無効、アプリケーション固有のサービスは未登録です。
+`benchmarks/Mugi.LoadBench` は、Mugi サーバーと等価な ASP.NET Core Minimal API サーバーを 1 つずつ起動し、loopback の HTTP/1.1 で `HttpClient` の負荷クライアント（128 並行、3 秒のウォームアップ、10 秒の計測）でそれぞれに負荷をかけます。両サーバーの `GET /`、`GET /users/123`、`POST /echo` は同じレスポンス本文を返します。ASP.NET Core サーバーは `WebApplication.CreateSlimBuilder`、Minimal API のルーティング、camelCase を指定した System.Text.Json の source generation を使い、コンソールログは無効、アプリケーション固有のサービスは未登録です。
 
-スループットはどのエンドポイントでも両者の差がおよそ 1〜3% で、共通の Kestrel 転送層と整合します。Miya はピーク作業セットが約 20 MiB 小さく、リクエストあたりの割り当ても少ない結果でした。表は 3 反復の中央値です。
+スループットはどのエンドポイントでも両者の差がおよそ 1〜3% で、共通の Kestrel 転送層と整合します。Mugi はピーク作業セットが約 20 MiB 小さく、リクエストあたりの割り当ても少ない結果でした。表は 3 反復の中央値です。
 
 | エンドポイント | フレームワーク | スループット (req/s) | p99 | ピーク作業セット | 1 リクエストあたりの割り当て |
 | --- | --- | ---: | ---: | ---: | ---: |
-| plaintext | Miya | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
+| plaintext | Mugi | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
 | plaintext | ASP.NET Core | 174,897 | 1.960 ms | 97.8 MiB | 1,016 B |
-| JSON GET | Miya | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
+| JSON GET | Mugi | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
 | JSON GET | ASP.NET Core | 175,505 | 1.967 ms | 98.4 MiB | 384 B |
-| JSON POST | Miya | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
+| JSON POST | Mugi | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
 | JSON POST | ASP.NET Core | 166,704 | 2.048 ms | 100.5 MiB | 648 B |
 
 リクエストあたりの割り当ては、サーバーの `GC.GetTotalAllocatedBytes` の計測区間での差分をリクエスト数で割った値です。ピーク作業セットは、サーバーの実行中に 10 ms 間隔で取得した `WorkingSet64` の最大値です。
@@ -35,21 +35,21 @@
 同じ JIT 比較は次のコマンドで実行できます。
 
 ```sh
-./benchmarks/Miya.LoadBench/run.sh \
+./benchmarks/Mugi.LoadBench/run.sh \
   --concurrency 128 --warmup 3 --duration 10 --iterations 3
 ```
 
-## Miya と System.Text.Json
+## Mugi と System.Text.Json
 
-シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Miya は `Miya.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
+シリアライザーのジョブは、1 回の launch、5 回の warmup、20 回の計測、250 ms の iteration time を使いました。Mugi は `Mugi.Generators` が生成した codec を使い、codec を渡さない `Json.Serialize` と `Json.Deserialize` のオーバーロードで解決しました。ベンチマーク専用の codec は使っていません。
 
 両方のシリアライザーは再利用した `IBufferWriter<byte>` に書き込みました。System.Text.Json は source generation、camelCase 命名、`UnsafeRelaxedJsonEscaping`、required メンバー検査、nullable 注釈検査を使いました。リクエスト JSON は計測区間の前に用意し、両シリアライザーが required プロパティの欠落と非 nullable プロパティへの null をどちらも拒否することを setup で確認しました。バッファ拡張のケースは各操作の中で 16 バイトのバッファを作りました。
 
-合格条件は、JIT と NativeAOT の両方で、すべてのシナリオにおいて Miya の平均時間と割り当てバイト数が System.Text.Json 以下であることです。これらの結果は JIT と NativeAOT の全 16 ケースで合格しました。割り当てバイト数はすべてのシナリオで System.Text.Json 以下でした。
+合格条件は、JIT と NativeAOT の両方で、すべてのシナリオにおいて Mugi の平均時間と割り当てバイト数が System.Text.Json 以下であることです。これらの結果は JIT と NativeAOT の全 16 ケースで合格しました。割り当てバイト数はすべてのシナリオで System.Text.Json 以下でした。
 
 JIT の結果:
 
-| シナリオ | Miya 平均 | STJ 平均 | Miya 割り当て | STJ 割り当て |
+| シナリオ | Mugi 平均 | STJ 平均 | Mugi 割り当て | STJ 割り当て |
 | --- | ---: | ---: | ---: | ---: |
 | 小さな DTO | 57.44 ns | 66.05 ns | 0 B | 0 B |
 | DTO 100 件のリスト | 3,199.00 ns | 5,098.00 ns | 0 B | 0 B |
@@ -62,7 +62,7 @@ JIT の結果:
 
 NativeAOT の結果:
 
-| シナリオ | Miya 平均 | STJ 平均 | Miya 割り当て | STJ 割り当て |
+| シナリオ | Mugi 平均 | STJ 平均 | Mugi 割り当て | STJ 割り当て |
 | --- | ---: | ---: | ---: | ---: |
 | 小さな DTO | 45.97 ns | 58.77 ns | 0 B | 0 B |
 | DTO 100 件のリスト | 7,577.34 ns | 9,414.40 ns | 0 B | 0 B |
@@ -85,7 +85,7 @@ SpanJson 4.2.1 は JIT で別に計測しました。API が同じ `IBufferWrite
 | 整数中心の DTO | 6,726.19 ns | 1,032 B |
 | リクエストバインド | 194.46 ns | 280 B |
 
-Miya の JIT 平均は、この 7 つの参考シナリオのうち 4 つで下回りました。SpanJson の平均は、小さな DTO、ネストした DTO、リクエストバインドのケースで下回りました。
+Mugi の JIT 平均は、この 7 つの参考シナリオのうち 4 つで下回りました。SpanJson の平均は、小さな DTO、ネストした DTO、リクエストバインドのケースで下回りました。
 
 ## ルーティングとミドルウェアパイプライン
 
@@ -109,17 +109,17 @@ Miya の JIT 平均は、この 7 つの参考シナリオのうち 4 つで下�
 ## ベンチマークの実行
 
 ```sh
-dotnet build benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj -c Release
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --filter '*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
+dotnet build benchmarks/Mugi.Benchmarks/Mugi.Benchmarks.csproj -c Release
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --filter '*'
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- \
   --jit-only --filter '*SmallDto*' '*RequestBind*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- \
   --jit-only --filter '*List100*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --routing
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --spanjson
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --routing
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --spanjson
 ```

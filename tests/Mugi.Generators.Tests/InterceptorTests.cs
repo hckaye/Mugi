@@ -1,0 +1,211 @@
+using System.Reflection;
+using Microsoft.CodeAnalysis;
+
+namespace Mugi.Generators.Tests;
+
+public sealed class InterceptorTests
+{
+    [Fact]
+    public void Json_and_route_calls_are_rewritten_to_generated_interceptors()
+    {
+        const string source = """
+            using System.Threading.Tasks;
+            using Mugi;
+
+            public sealed record Payload(int Id);
+            public static class Calls
+            {
+                public static ValueTask Write(Context context) => context.Json(new Payload(1));
+                public static void Register(App app) => app.Get("/items/:id", c => c.Text("ok"));
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.Empty(errors);
+        Assert.Contains(
+            "[global::System.Runtime.CompilerServices.InterceptsLocationAttribute(",
+            run.SourcesWithPrefix("Mugi.Interceptor."),
+            StringComparison.Ordinal);
+        Assert.Contains("RouteTemplates.Route_", run.SourcesWithPrefix("Mugi.Interceptor."), StringComparison.Ordinal);
+
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var calls = assembly.GetType("Calls")!;
+        Assert.Contains(GetCalledMethods(calls.GetMethod("Write")!), IsGeneratedInterceptor);
+        Assert.Contains(GetCalledMethods(calls.GetMethod("Register")!), IsGeneratedInterceptor);
+    }
+
+    [Fact]
+    public void Generic_app_derived_context_and_explicit_json_type_use_declaring_receivers()
+    {
+        const string source = """
+            using System.Threading.Tasks;
+            using Mugi;
+            using Mugi.Json;
+
+            public sealed class MyContext : Context { }
+            public sealed record Payload(int Id);
+            public static class Calls
+            {
+                public static void Register(App<MyContext> app) =>
+                    app.Get("/generic", c => c.Text("ok"));
+                public static ValueTask Write(MyContext context, Payload value) =>
+                    context.Json<Payload>(value);
+                public static ValueTask Generic<T>(Context context, T value) => context.Json(value);
+                public static void Include() => Json.Include<Payload>();
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.Empty(errors);
+        var generated = run.SourcesWithPrefix("Mugi.Interceptor.");
+        Assert.Contains("this global::Mugi.Context receiver", generated, StringComparison.Ordinal);
+        Assert.Contains("this global::Mugi.App<global::MyContext> receiver", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Nullable_reference_call_sites_share_the_underlying_codec()
+    {
+        const string source = """
+            #nullable enable
+            using System.Threading.Tasks;
+            using Mugi;
+
+            public sealed record Payload(int Id);
+            public static class Calls
+            {
+                public static ValueTask Write(Context context, Payload? value) => context.Json(value);
+                public static ValueTask WriteNonNull(Context context, Payload value) => context.Json(value);
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
+            .ToArray();
+        Assert.Empty(errors);
+
+        var codecs = run.SourcesWithPrefix("Mugi.JsonCodec.");
+        Assert.Equal(1, CountOccurrences(codecs, "sealed class Codec_global_003A__003A_Payload"));
+        Assert.DoesNotContain("_003F_", codecs, StringComparison.Ordinal);
+        Assert.Contains(".Json<global::Payload>(value!", run.SourcesWithPrefix("Mugi.Interceptor."), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Intercepted_json_call_uses_the_last_registered_codec()
+    {
+        const string source = """
+            using System;
+            using System.IO;
+            using System.Reflection;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Http.Features;
+            using Mugi;
+            using Mugi.Json;
+
+            public sealed record Payload(int Id);
+            public sealed class CustomCodec : IJsonCodec<Payload>
+            {
+                public static readonly CustomCodec Instance = new();
+                public void Write(ref JsonWriter writer, Payload? value) =>
+                    writer.WriteRaw("{\"custom\":true}"u8);
+                public Payload? Read(ref JsonReader reader) => throw new NotSupportedException();
+            }
+            public static class Runner
+            {
+                public static async Task<string> Run()
+                {
+                    Json.Register<Payload>(CustomCodec.Instance);
+                    var stream = new MemoryStream();
+                    var features = new FeatureCollection();
+                    features.Set<IHttpRequestFeature>(new HttpRequestFeature { Method = "GET", Path = "/" });
+                    features.Set<IHttpResponseFeature>(new HttpResponseFeature());
+                    features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(stream));
+
+                    var context = new Context();
+                    typeof(Context).GetMethod("Initialize", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(context, new object?[] { features, null });
+                    using ((IDisposable)typeof(Context)
+                        .GetMethod("EnterExecutionScope", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(context, null)!)
+                    {
+                        await context.Json(new Payload(7));
+                        var completion = (ValueTask)typeof(Context)
+                            .GetMethod("CompleteResponse", BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .Invoke(context, null)!;
+                        await completion;
+                    }
+
+                    return Encoding.UTF8.GetString(stream.ToArray());
+                }
+            }
+            """;
+
+        var run = GeneratorTestHelper.Run(GeneratorTestHelper.CreateCompilation(source));
+        var errors = run.Compilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.Empty(errors);
+        Assert.Contains("Json.ResolveCodec<global::Payload>", run.SourcesWithPrefix("Mugi.Interceptor."), StringComparison.Ordinal);
+
+        var assembly = GeneratorTestHelper.EmitAndLoad(run.Compilation);
+        var task = Assert.IsType<Task<string>>(
+            assembly.GetType("Runner")!.GetMethod("Run")!.Invoke(null, null));
+
+        Assert.Equal("{\"custom\":true}", await task);
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
+
+    private static bool IsGeneratedInterceptor(MethodBase method)
+    {
+        return method.DeclaringType?.FullName == "Mugi.Generated.Interceptors";
+    }
+
+    private static IEnumerable<MethodBase> GetCalledMethods(MethodInfo method)
+    {
+        var bytes = method.GetMethodBody()!.GetILAsByteArray()!;
+        for (var index = 0; index <= bytes.Length - 5; index++)
+        {
+            if (bytes[index] is not (0x28 or 0x6F))
+            {
+                continue;
+            }
+
+            var token = BitConverter.ToInt32(bytes, index + 1);
+            MethodBase? called = null;
+            try
+            {
+                called = method.Module.ResolveMethod(token);
+            }
+            catch (ArgumentException)
+            {
+            }
+
+            if (called is not null)
+            {
+                yield return called;
+            }
+
+            index += 4;
+        }
+    }
+}

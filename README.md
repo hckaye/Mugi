@@ -1,50 +1,50 @@
-# Miya
+# Mugi
 
 English | [日本語](README.ja.md)
 
-[![Miya](https://img.shields.io/nuget/v/Miya?label=Miya)](https://www.nuget.org/packages/Miya)
-[![Miya.Json](https://img.shields.io/nuget/v/Miya.Json?label=Miya.Json)](https://www.nuget.org/packages/Miya.Json)
-[![Miya.Schema](https://img.shields.io/nuget/v/Miya.Schema?label=Miya.Schema)](https://www.nuget.org/packages/Miya.Schema)
-[![Miya.Reflection](https://img.shields.io/nuget/v/Miya.Reflection?label=Miya.Reflection)](https://www.nuget.org/packages/Miya.Reflection)
-[![Miya.Jwt](https://img.shields.io/nuget/v/Miya.Jwt?label=Miya.Jwt)](https://www.nuget.org/packages/Miya.Jwt)
-[![Miya.Generators](https://img.shields.io/nuget/v/Miya.Generators?label=Miya.Generators)](https://www.nuget.org/packages/Miya.Generators)
-[![Miya.Gen](https://img.shields.io/nuget/v/Miya.Gen?label=Miya.Gen)](https://www.nuget.org/packages/Miya.Gen)
+[![Mugi](https://img.shields.io/nuget/v/Mugi?label=Mugi)](https://www.nuget.org/packages/Mugi)
+[![Mugi.Json](https://img.shields.io/nuget/v/Mugi.Json?label=Mugi.Json)](https://www.nuget.org/packages/Mugi.Json)
+[![Mugi.Schema](https://img.shields.io/nuget/v/Mugi.Schema?label=Mugi.Schema)](https://www.nuget.org/packages/Mugi.Schema)
+[![Mugi.Reflection](https://img.shields.io/nuget/v/Mugi.Reflection?label=Mugi.Reflection)](https://www.nuget.org/packages/Mugi.Reflection)
+[![Mugi.Jwt](https://img.shields.io/nuget/v/Mugi.Jwt?label=Mugi.Jwt)](https://www.nuget.org/packages/Mugi.Jwt)
+[![Mugi.Generators](https://img.shields.io/nuget/v/Mugi.Generators?label=Mugi.Generators)](https://www.nuget.org/packages/Mugi.Generators)
+[![Mugi.Gen](https://img.shields.io/nuget/v/Mugi.Gen?label=Mugi.Gen)](https://www.nuget.org/packages/Mugi.Gen)
 
-Miya is a fast, simple web application framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, route requests, run middleware, bind and validate typed input, and read the request and write the response through one context object. It runs on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
+Mugi is a fast, simple web application framework for .NET. Instead of a large framework stack, it gives you a lean, modern API: write handlers as lambdas, route requests, run middleware, bind and validate typed input, and read the request and write the response through one context object. It runs on Kestrel without `WebApplication`, the Generic Host, or a dependency injection container.
 
-Miya is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing, JSON, and typed input binders are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
+Mugi is built for NativeAOT. At runtime it uses no reflection, no assembly scanning, and no runtime code generation, so a published app starts in a few milliseconds and ships as a single small binary. Routing, JSON, and typed input binders are prepared at compile time by a source generator; you never call the generator yourself, and referencing the package is enough.
 
 ## Install
 
-Miya's packages target `net9.0` and run on .NET 9 or later. Building an app needs the .NET 9 SDK or newer, because the generator uses stable C# interceptors that shipped in that release.
+Mugi's packages target `net9.0` and run on .NET 9 or later. Building an app needs the .NET 9 SDK or newer, because the generator uses stable C# interceptors that shipped in that release.
 
-Add the runtime package and the generator package. Add `Miya.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
+Add the runtime package and the generator package. Add `Mugi.Schema` when the app uses typed input. The generator runs during the build and produces routing, JSON, and typed input code.
 
 ```xml
 <PropertyGroup>
   <TargetFramework>net9.0</TargetFramework>
   <PublishAot>true</PublishAot>
-  <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
+  <InterceptorsNamespaces>$(InterceptorsNamespaces);Mugi.Generated</InterceptorsNamespaces>
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="Miya" Version="0.1.1" />
-  <PackageReference Include="Miya.Schema" Version="0.1.1" />
-  <PackageReference Include="Miya.Generators" Version="0.1.1" />
+  <PackageReference Include="Mugi" Version="0.1.2" />
+  <PackageReference Include="Mugi.Schema" Version="0.1.2" />
+  <PackageReference Include="Mugi.Generators" Version="0.1.2" />
 </ItemGroup>
 ```
 
-The `InterceptorsNamespaces` line is required. It lets the generator replace the calls it recognizes with faster direct calls. The `Miya.Generators` package carries the generator as an analyzer and a `buildTransitive` props file that sets this up automatically, including when the package arrives through another project reference.
+The `InterceptorsNamespaces` line is required. It lets the generator replace the calls it recognizes with faster direct calls. The `Mugi.Generators` package carries the generator as an analyzer and a `buildTransitive` props file that sets this up automatically, including when the package arrives through another project reference.
 
-`Miya.Schema` is a separate package. Keep it only when the application uses typed input and validation.
+`Mugi.Schema` is a separate package. Keep it only when the application uses typed input and validation.
 
 When you reference the projects directly in a repository, pass the generator to the compiler as an analyzer:
 
 ```xml
 <ItemGroup>
-  <ProjectReference Include="../Miya/src/Miya/Miya.csproj" />
-  <ProjectReference Include="../Miya/src/Miya.Schema/Miya.Schema.csproj" />
-  <ProjectReference Include="../Miya/src/Miya.Generators/Miya.Generators.csproj"
+  <ProjectReference Include="../Mugi/src/Mugi/Mugi.csproj" />
+  <ProjectReference Include="../Mugi/src/Mugi.Schema/Mugi.Schema.csproj" />
+  <ProjectReference Include="../Mugi/src/Mugi.Generators/Mugi.Generators.csproj"
                     OutputItemType="Analyzer"
                     ReferenceOutputAssembly="false" />
 </ItemGroup>
@@ -53,7 +53,7 @@ When you reference the projects directly in a repository, pass the generator to 
 ## Quick start
 
 ```csharp
-using Miya;
+using Mugi;
 
 var app = new App();
 
@@ -111,7 +111,7 @@ Write the response:
 
 `c.Req.Cookie(name)` reads the first cookie with that name. `c.SetCookie` adds a `Set-Cookie` response header, and `c.DeleteCookie` expires a cookie. The default attributes are `Path=/` and `SameSite=Lax`; set `HttpOnly`, `Secure`, `Domain`, `MaxAge`, `Expires`, or `SameSite` through `CookieOptions` when needed. `SameSite=None` requires `Secure`.
 
-Signed cookies use HMAC-SHA256 and are written as `value.base64url(HMAC-SHA256(UTF-8(value)))`. The application supplies the same non-empty key to `SetSignedCookie` and to every `SignedCookie` read. Miya does not store or rotate that key for you. A missing or invalid signature returns null.
+Signed cookies use HMAC-SHA256 and are written as `value.base64url(HMAC-SHA256(UTF-8(value)))`. The application supplies the same non-empty key to `SetSignedCookie` and to every `SignedCookie` read. Mugi does not store or rotate that key for you. A missing or invalid signature returns null.
 
 ```csharp
 app.Get("/session", c =>
@@ -187,7 +187,7 @@ app.Get("/events", c => c.EventStream(async (events, cancellationToken) =>
 
 ### WebSockets
 
-`c.WebSocket` accepts both an HTTP/1.1 GET upgrade and an HTTP/2 extended CONNECT request. Register the endpoint with `app.Get`. `WebSocketOptions.SubProtocols` lists server-preference order; Miya selects a protocol requested by the client when one matches, and declines the subprotocol when none matches. `KeepAliveInterval` defaults to 30 seconds.
+`c.WebSocket` accepts both an HTTP/1.1 GET upgrade and an HTTP/2 extended CONNECT request. Register the endpoint with `app.Get`. `WebSocketOptions.SubProtocols` lists server-preference order; Mugi selects a protocol requested by the client when one matches, and declines the subprotocol when none matches. `KeepAliveInterval` defaults to 30 seconds.
 
 ```csharp
 using System.Net.WebSockets;
@@ -210,7 +210,7 @@ app.Get("/echo", c => c.WebSocket(async (socket, cancellationToken) =>
 }));
 ```
 
-The handler receives the connected `System.Net.WebSockets.WebSocket` and the request-abort token. If the handler returns while the socket is still open, Miya closes it normally. A handler exception attempts a 1011 close and then aborts the connection.
+The handler receives the connected `System.Net.WebSockets.WebSocket` and the request-abort token. If the handler returns while the socket is still open, Mugi closes it normally. A handler exception attempts a 1011 close and then aborts the connection.
 
 ### HTML interpolation
 
@@ -266,7 +266,7 @@ app.Static("/assets", new StaticOptions
 `app.Request(method, target, options)` runs the complete application pipeline without starting a server. The method is normalized to uppercase, the target may include a query string, and streamed response bodies are collected in `TestResponse`. `TestRequestOptions` supplies a byte `Body` or UTF-8 `TextBody`; a non-empty `Body` and `TextBody` cannot be used together. It also supplies repeated `Headers`. `TestResponse` exposes `Status`, ordered repeated `Headers`, `Body`, `Header`, `HeaderValues`, `Text`, and `Json<T>` when a codec for `T` is registered. Kestrel transport headers such as `Date` and `Server` are not included.
 
 ```csharp
-using Miya;
+using Mugi;
 using Xunit;
 
 public sealed class UserTests
@@ -311,10 +311,10 @@ Matching uses the path Kestrel already decoded, compared by ordinal. An encoded 
 
 ## Typed input and validation
 
-`Miya.Schema` combines route parameters, query values, headers, form fields, and JSON body fields in one input record. The handler runs only after parsing and validation succeed.
+`Mugi.Schema` combines route parameters, query values, headers, form fields, and JSON body fields in one input record. The handler runs only after parsing and validation succeed.
 
 ```csharp
-using Miya.Schema;
+using Mugi.Schema;
 
 var searchSchema = Schemas.For<SearchInput>()
     .Query(input => input.Limit, rules => rules.Default(20).Range(1, 100));
@@ -336,7 +336,7 @@ public sealed record CreatePersonInput(string Name, int Age, string? Note);
 
 An explicit `Route`, `Query`, `Body`, or `Header` mapping takes precedence. An unmapped field whose name exactly matches a `:parameter` name comes from the route. Other unmapped fields come from the JSON body for `POST`, `PUT`, and `PATCH`, and from the query string for other methods. Name matching is ordinal and case-sensitive. `Header` also takes the HTTP header name, for example `.Header(input => input.RequestId, "X-Request-Id")`.
 
-Text values support primitives, `string`, `Guid`, Boolean values, enum names or numbers, `DateTime`, and `DateTimeOffset`. Body fields use Miya's generated JSON codecs. The generator reads the field selectors and rule declarations at build time; the runtime does not invoke those selectors or compile expression trees.
+Text values support primitives, `string`, `Guid`, Boolean values, enum names or numbers, `DateTime`, and `DateTimeOffset`. Body fields use Mugi's generated JSON codecs. The generator reads the field selectors and rule declarations at build time; the runtime does not invoke those selectors or compile expression trees.
 
 Rules can be chained. Numeric fields support `Min`, `Max`, `Range`, `Positive`, and `NonNegative`. Strings support `NotEmpty`, `Length`, `MinLength`, `MaxLength`, and `Pattern`. Every field supports `Optional`, `Default`, and `Must`.
 
@@ -352,7 +352,7 @@ A missing required value, parse failure, invalid JSON body, or failed rule retur
 
 ### Form binding
 
-Use `.Form(input => input.Field)` to read a field from `await c.Req.Form()`. The generated binder calls `FormData.Get` with the property name, so it uses the first value for that field. It supports URL-encoded and multipart form fields. `Miya.FormFile` is not a supported generated field type; use `FormData.File` or the streaming `MultipartReader` API for uploads.
+Use `.Form(input => input.Field)` to read a field from `await c.Req.Form()`. The generated binder calls `FormData.Get` with the property name, so it uses the first value for that field. It supports URL-encoded and multipart form fields. `Mugi.FormFile` is not a supported generated field type; use `FormData.File` or the streaming `MultipartReader` API for uploads.
 
 ```csharp
 var formSchema = Schemas.For<CreatePersonInput>()
@@ -365,7 +365,7 @@ app.Post("/people", formSchema,
 public sealed record CreatePersonInput(string Name, int Age);
 ```
 
-`.Form` and `.Body` cannot be used in the same schema. The generator reports MIYA016 for that combination. Form parsing errors in a generated typed endpoint are returned as the endpoint's structured validation response with status 400. Direct calls to `c.Req.Form()` retain their input status: unsupported media type is 415, malformed input is 400, and a form limit is 413.
+`.Form` and `.Body` cannot be used in the same schema. The generator reports MUGI016 for that combination. Form parsing errors in a generated typed endpoint are returned as the endpoint's structured validation response with status 400. Direct calls to `c.Req.Form()` retain their input status: unsupported media type is 415, malformed input is 400, and a form limit is 413.
 
 ### Text parsing rules
 
@@ -377,7 +377,7 @@ Generated text binding uses invariant culture and strict formats. Integer types 
 
 ### Sharing schema parts
 
-Define a reusable `Schemas.Part<TPart>()` for fields declared by an interface or base type, then apply it with `.Use(part)`. The `Use<T, TPart>` extension has `where T : TPart`, so a part can only be applied to a concrete input that implements or derives from its declaration. Direct mappings on the concrete schema override a part mapping with the same member name. Two parts contributing the same member are a conflict and produce MIYA024. A part type must have one definition in the same compilation, and its members must be implemented implicitly. Violations produce MIYA017 through MIYA019.
+Define a reusable `Schemas.Part<TPart>()` for fields declared by an interface or base type, then apply it with `.Use(part)`. The `Use<T, TPart>` extension has `where T : TPart`, so a part can only be applied to a concrete input that implements or derives from its declaration. Direct mappings on the concrete schema override a part mapping with the same member name. Two parts contributing the same member are a conflict and produce MUGI024. A part type must have one definition in the same compilation, and its members must be implemented implicitly. Violations produce MUGI017 through MUGI019.
 
 ```csharp
 public interface IPageQuery
@@ -399,7 +399,7 @@ var searchSchema = Schemas.For<SearchInput>()
 
 ### Sharing rule methods
 
-For a rule set that applies to a nested record, pass a static method containing one rule chain rooted at its `Rule<T>` parameter. The method can be passed as a method group or through a forwarding lambda. Every predicate referenced from generated code must be `internal` or `public`, along with its containing type and any required members. A private predicate produces MIYA026.
+For a rule set that applies to a nested record, pass a static method containing one rule chain rooted at its `Rule<T>` parameter. The method can be passed as a method group or through a forwarding lambda. Every predicate referenced from generated code must be `internal` or `public`, along with its containing type and any required members. A private predicate produces MUGI026.
 
 ```csharp
 public sealed record Address(string City);
@@ -420,7 +420,7 @@ var profileSchema = Schemas.For<CreateProfileInput>()
     .Body(input => input.Profile, ProfileRules.Apply);
 ```
 
-The method itself must be a static method in the same compilation and contain a single chain. A multi-statement method, an instance method, a chain rooted at another `Rule<T>`, or a method from another assembly produces MIYA025.
+The method itself must be a static method in the same compilation and contain a single chain. A multi-statement method, an instance method, a chain rooted at another `Rule<T>`, or a method from another assembly produces MUGI025.
 
 ## Middleware
 
@@ -439,10 +439,10 @@ app.Use(static async (c, next) =>
 
 ### Middleware factories and typed apps
 
-The built-in factories are in the `Miya.Middleware` namespace and return `Middleware<Context>`. Register the returned delegate with `app.Use(...)`:
+The built-in factories are in the `Mugi.Middleware` namespace and return `Middleware<Context>`. Register the returned delegate with `app.Use(...)`:
 
 ```csharp
-using Miya.Middleware;
+using Mugi.Middleware;
 
 app.Use(RequestId.Middleware());
 ```
@@ -508,7 +508,7 @@ app.Use(BasicAuth.Middleware(new BasicAuthOptions
 
 ### BearerAuth
 
-`BearerAuth.Middleware` requires exactly one fixed `Token` or `Validate` callback. The default realm is `Restricted`, and the token uses the RFC 6750 `b64token` character set. Missing authorization or a different scheme returns 401. A malformed Bearer header returns 400 with `error="invalid_request"`; a token rejected by validation returns 401 with `error="invalid_token"`. The generic factory stores the validated token string in `IAuthContext.AuthUser`. This middleware compares bearer tokens; it does not verify JWTs. Use `Miya.Jwt` for JWTs.
+`BearerAuth.Middleware` requires exactly one fixed `Token` or `Validate` callback. The default realm is `Restricted`, and the token uses the RFC 6750 `b64token` character set. Missing authorization or a different scheme returns 401. A malformed Bearer header returns 400 with `error="invalid_request"`; a token rejected by validation returns 401 with `error="invalid_token"`. The generic factory stores the validated token string in `IAuthContext.AuthUser`. This middleware compares bearer tokens; it does not verify JWTs. Use `Mugi.Jwt` for JWTs.
 
 ```csharp
 app.Use(BearerAuth.Middleware(new BearerAuthOptions
@@ -549,7 +549,7 @@ app.Use(ETag.Middleware(new ETagOptions { Weak = true }));
 
 ### RequestTimeout
 
-`RequestTimeout.Middleware(timeout)` has no default timeout. When a positive deadline expires while the response is still buffered, it replaces the response with status 504 and the `text/plain; charset=utf-8` body `Gateway Timeout`. If streaming has started, the status cannot be changed, so Miya aborts the connection.
+`RequestTimeout.Middleware(timeout)` has no default timeout. When a positive deadline expires while the response is still buffered, it replaces the response with status 504 and the `text/plain; charset=utf-8` body `Gateway Timeout`. If streaming has started, the status cannot be changed, so Mugi aborts the connection.
 
 ```csharp
 app.Use(RequestTimeout.Middleware(TimeSpan.FromSeconds(2)));
@@ -573,7 +573,7 @@ app.Use(async (c, next) =>
 
 ## Returning and reading JSON
 
-Miya reads and writes JSON with its own serializer. In the common case you configure nothing: return an object and Miya writes it as JSON.
+Mugi reads and writes JSON with its own serializer. In the common case you configure nothing: return an object and Mugi writes it as JSON.
 
 ```csharp
 app.Get("/users/:id", c => c.Json(new User(c.Param("id"), "Ada")));
@@ -587,7 +587,7 @@ app.Post("/users", async c =>
 public sealed record User(string Id, string Name);
 ```
 
-At build time the generator reads each `c.Json(...)` and `c.Req.Json<T>()` call, collects the types you serialize, and generates the code that reads and writes them. Nothing is discovered at runtime, which is why this works under NativeAOT. Property names are `camelCase` by default; set `<MiyaJsonNaming>PascalCase</MiyaJsonNaming>` to keep the C# casing.
+At build time the generator reads each `c.Json(...)` and `c.Req.Json<T>()` call, collects the types you serialize, and generates the code that reads and writes them. Nothing is discovered at runtime, which is why this works under NativeAOT. Property names are `camelCase` by default; set `<MugiJsonNaming>PascalCase</MugiJsonNaming>` to keep the C# casing.
 
 ### Supported types
 
@@ -608,7 +608,7 @@ Json.Include<User>();
 A codec is the small class that reads and writes one type as JSON. The generator writes one codec per supported type for you. When you need a type the generator does not support, or a specific JSON shape, write a codec by implementing `IJsonCodec<T>` and register it with `Json.Register`. A registered codec is used everywhere that type is serialized, including direct `c.Json` calls.
 
 ```csharp
-using Miya.Json;
+using Mugi.Json;
 
 Json.Register(UserCodec.Instance);
 
@@ -684,86 +684,86 @@ Request parsing uses limits so that malformed or hostile JSON cannot exhaust mem
 
 NaN and Infinity are rejected by default. `JsonOptions` also carries a cancellation token for long serialization and parsing.
 
-`AppOptions.MaxBufferedResponseBytes` is a response-buffer threshold, not an output JSON limit. Miya writes the response serializer once; when the buffer crosses the threshold, the bytes already written are promoted to chunked streaming and the remaining JSON is written there. The response is not rejected because it is larger than the threshold.
+`AppOptions.MaxBufferedResponseBytes` is a response-buffer threshold, not an output JSON limit. Mugi writes the response serializer once; when the buffer crosses the threshold, the bytes already written are promoted to chunked streaming and the remaining JSON is written there. The response is not rejected because it is larger than the threshold.
 
-As a build-time optimization, Miya replaces the `c.Json` and route calls it recognizes with direct calls into the generated code, using a C# feature called interceptors. This changes nothing you observe: serialization and routing behave the same whether or not a call was replaced, and a call that the generator cannot see still works as long as a codec is registered.
+As a build-time optimization, Mugi replaces the `c.Json` and route calls it recognizes with direct calls into the generated code, using a C# feature called interceptors. This changes nothing you observe: serialization and routing behave the same whether or not a call was replaced, and a call that the generator cannot see still works as long as a codec is registered.
 
 ## Generating source without the compiler generator
 
-Some build setups cannot run compiler-integrated source generators. `miya-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
+Some build setups cannot run compiler-integrated source generators. `mugi-gen` produces the same JSON and routing code as ordinary `.cs` files that you generate as a build step. It does not emit the interceptor optimization, so only the direct-call speedup is absent; behavior is the same.
 
 ```sh
-dotnet tool install --global Miya.Gen --version 0.1.1
+dotnet tool install --global Mugi.Gen --version 0.1.2
 dotnet build MyApp.csproj
-miya-gen --project MyApp.csproj --output Generated
+mugi-gen --project MyApp.csproj --output Generated
 dotnet build MyApp.csproj
 ```
 
-The SDK compiles `Generated/*.cs` automatically when the directory is under the project root; a directory elsewhere must be added with a `Compile` item. The project must compile before generation, and existing `Miya.*.g.cs` files in the output directory are replaced. From this repository the equivalent command is:
+The SDK compiles `Generated/*.cs` automatically when the directory is under the project root; a directory elsewhere must be added with a `Compile` item. The project must compile before generation, and existing `Mugi.*.g.cs` files in the output directory are replaced. From this repository the equivalent command is:
 
 ```sh
-dotnet run --project src/Miya.Gen -- \
+dotnet run --project src/Mugi.Gen -- \
   --project samples/Hello/Hello.csproj \
   --output samples/Hello/Generated
 ```
 
-## Zero-generation runtime (Miya.Reflection)
+## Zero-generation runtime (Mugi.Reflection)
 
-Routing and text responses already work without generated source. When neither the source generator nor `miya-gen` is available, add the opt-in `Miya.Reflection` package to create JSON codecs from public properties and constructors at runtime.
+Routing and text responses already work without generated source. When neither the source generator nor `mugi-gen` is available, add the opt-in `Mugi.Reflection` package to create JSON codecs from public properties and constructors at runtime.
 
 ```xml
-<PackageReference Include="Miya.Reflection" Version="0.1.1" />
+<PackageReference Include="Mugi.Reflection" Version="0.1.2" />
 ```
 
 Enable the fallback once during startup:
 
 ```csharp
-using Miya.Reflection;
+using Mugi.Reflection;
 
 ReflectionCodecs.Enable();
 ```
 
-The fallback is disabled by default. It supports the same primitive values, arrays, `List<T>`, `Dictionary<string, T>`, nullable values, enums, POCOs, and records with camel-case property names. `Miya.Reflection` does not support NativeAOT; use generated codecs when publishing with AOT.
+The fallback is disabled by default. It supports the same primitive values, arrays, `List<T>`, `Dictionary<string, T>`, nullable values, enums, POCOs, and records with camel-case property names. `Mugi.Reflection` does not support NativeAOT; use generated codecs when publishing with AOT.
 ## OpenAPI
 
-`miya-gen openapi` reads the routes in a compiled project and writes an OpenAPI 3.1 document:
+`mugi-gen openapi` reads the routes in a compiled project and writes an OpenAPI 3.1 document:
 
 ```sh
-miya-gen openapi --project MyApp.csproj --output openapi.json
+mugi-gen openapi --project MyApp.csproj --output openapi.json
 ```
 
-Route parameters are emitted as required path parameters. A route that uses `Miya.Schema` also includes the source, type, default, and supported validation constraints for its path, query, header, and JSON body fields. Referenced JSON DTOs are placed under `components/schemas`.
+Route parameters are emitted as required path parameters. A route that uses `Mugi.Schema` also includes the source, type, default, and supported validation constraints for its path, query, header, and JSON body fields. Referenced JSON DTOs are placed under `components/schemas`.
 
 Response detection is best effort and examines the handler lambda at the registration site. A `c.Json(value)` call produces an `application/json` response schema, and `c.Text(value)` produces `text/plain`. When neither call can be identified, the operation has a 200 response without declared content. Typed routes also declare the validation-error 400 response.
 
 ## Importing an OpenAPI document
 
-`Miya.Generators` can read an existing OpenAPI document during compilation. The `miya-gen openapi` command above goes from C# routes to an OpenAPI document; this setting goes from an OpenAPI document to generated C#.
+`Mugi.Generators` can read an existing OpenAPI document during compilation. The `mugi-gen openapi` command above goes from C# routes to an OpenAPI document; this setting goes from an OpenAPI document to generated C#.
 
-Add the JSON file as an `AdditionalFiles` item and mark it with `MiyaOpenApi`:
+Add the JSON file as an `AdditionalFiles` item and mark it with `MugiOpenApi`:
 
 ```xml
 <ItemGroup>
   <AdditionalFiles Include="api/openapi.json"
-                   MiyaOpenApi="true"
-                   MiyaOpenApiNamespace="MyApp.Api" />
+                   MugiOpenApi="true"
+                   MugiOpenApiNamespace="MyApp.Api" />
 </ItemGroup>
 ```
 
-`MiyaOpenApiNamespace` sets the namespace for the generated types. When it is omitted, the project root namespace is used.
+`MugiOpenApiNamespace` sets the namespace for the generated types. When it is omitted, the project root namespace is used.
 
-The generator produces public DTO records and string enums from `components/schemas`, a `Paths` class with one constant per operation, and an input record with an `ApiSchemas` field for each operation. OpenAPI path parameters such as `/users/{id}` become Miya patterns such as `/users/:id`. Each build recreates the generator-owned `.g.cs` file, so changes belong in the OpenAPI document rather than the generated source.
+The generator produces public DTO records and string enums from `components/schemas`, a `Paths` class with one constant per operation, and an input record with an `ApiSchemas` field for each operation. OpenAPI path parameters such as `/users/{id}` become Mugi patterns such as `/users/:id`. Each build recreates the generator-owned `.g.cs` file, so changes belong in the OpenAPI document rather than the generated source.
 
-The importer accepts OpenAPI 3.0 and 3.1 JSON. It supports object schemas, string enums, strings, Boolean values, `int32`, `int64`, `float`, `double`, `decimal`, arrays, local `components/schemas` references, nullable fields, and required fields. Operation input supports path, query, and header parameters plus JSON object request bodies. It maps numeric bounds, exclusive integer bounds, string lengths, patterns, defaults, and optional fields to `Miya.Schema` rules.
+The importer accepts OpenAPI 3.0 and 3.1 JSON. It supports object schemas, string enums, strings, Boolean values, `int32`, `int64`, `float`, `double`, `decimal`, arrays, local `components/schemas` references, nullable fields, and required fields. Operation input supports path, query, and header parameters plus JSON object request bodies. It maps numeric bounds, exclusive integer bounds, string lengths, patterns, defaults, and optional fields to `Mugi.Schema` rules.
 
-Composed schemas (`oneOf`, `anyOf`, and `allOf`), `additionalProperties`, external references, cookie parameters, non-JSON request bodies, and validation constraints without a `Miya.Schema` equivalent are skipped with MIYA020 through MIYA023 diagnostics. Path and query parameter names must also be valid C# identifiers because their generated schema mappings use the same names.
+Composed schemas (`oneOf`, `anyOf`, and `allOf`), `additionalProperties`, external references, cookie parameters, non-JSON request bodies, and validation constraints without a `Mugi.Schema` equivalent are skipped with MUGI020 through MUGI023 diagnostics. Path and query parameter names must also be valid C# identifiers because their generated schema mappings use the same names.
 
 ### Generating an HTTP client
 
-The `miya-gen client` mode generates a typed `HttpClient` wrapper from an OpenAPI document. `--namespace` defaults to `Generated`, and `--class-name` defaults to a name derived from the document title:
+The `mugi-gen client` mode generates a typed `HttpClient` wrapper from an OpenAPI document. `--namespace` defaults to `Generated`, and `--class-name` defaults to a name derived from the document title:
 
 ```sh
-miya-gen client --input api/openapi.json --output Generated \
+mugi-gen client --input api/openapi.json --output Generated \
   --namespace MyApp.Api --class-name CatalogClient
 ```
 
@@ -774,30 +774,30 @@ The compiler generator uses separate `AdditionalFiles` metadata for client gener
 ```xml
 <ItemGroup>
   <AdditionalFiles Include="api/openapi.json"
-                   MiyaOpenApiClient="true"
-                   MiyaOpenApiNamespace="MyApp.Api"
-                   MiyaOpenApiClientName="CatalogClient" />
+                   MugiOpenApiClient="true"
+                   MugiOpenApiNamespace="MyApp.Api"
+                   MugiOpenApiClientName="CatalogClient" />
 </ItemGroup>
 ```
 
-`MiyaOpenApiClient` enables the client independently of server import. `MiyaOpenApiNamespace` sets the target namespace and `MiyaOpenApiClientName` sets the class name; when omitted, the project root namespace and a name derived from the OpenAPI title are used. Set both `MiyaOpenApi="true"` and `MiyaOpenApiClient="true"` on one file when the server import and client should share generated component declarations. Only JSON success response bodies can be represented by the generated client; unsupported operations are skipped with a generator diagnostic.
+`MugiOpenApiClient` enables the client independently of server import. `MugiOpenApiNamespace` sets the target namespace and `MugiOpenApiClientName` sets the class name; when omitted, the project root namespace and a name derived from the OpenAPI title are used. Set both `MugiOpenApi="true"` and `MugiOpenApiClient="true"` on one file when the server import and client should share generated component declarations. Only JSON success response bodies can be represented by the generated client; unsupported operations are skipped with a generator diagnostic.
 
-`miya-gen import` runs the same import as a manual step for build setups that cannot use the source generator. It writes the generated `.g.cs` to disk instead of into the compilation:
+`mugi-gen import` runs the same import as a manual step for build setups that cannot use the source generator. It writes the generated `.g.cs` to disk instead of into the compilation:
 
 ```sh
-miya-gen import --input api/openapi.json --output Generated --namespace MyApp.Api
+mugi-gen import --input api/openapi.json --output Generated --namespace MyApp.Api
 ```
 
-## Miya.Jwt
+## Mugi.Jwt
 
-The `Miya.Jwt` package signs and verifies compact JWTs without reflection. It supports HS256, RS256, and ES256. `Jwt.Sign` creates a token with the algorithm selected by a `JwtKey`, and `Jwt.Verify` checks the signature and registered claims, then returns a `JwtResult` rather than throwing for an invalid token.
+The `Mugi.Jwt` package signs and verifies compact JWTs without reflection. It supports HS256, RS256, and ES256. `Jwt.Sign` creates a token with the algorithm selected by a `JwtKey`, and `Jwt.Verify` checks the signature and registered claims, then returns a `JwtResult` rather than throwing for an invalid token.
 
 ```xml
-<PackageReference Include="Miya.Jwt" Version="0.1.1" />
+<PackageReference Include="Mugi.Jwt" Version="0.1.2" />
 ```
 
 ```csharp
-using Miya.Jwt;
+using Mugi.Jwt;
 
 var key = JwtKey.HS256("01234567890123456789012345678901"u8);
 var token = Jwt.Sign(
@@ -822,8 +822,8 @@ if (result.IsValid)
 `JwtAuth.Middleware` validates a bearer token before calling the next handler. Missing or invalid tokens return 401 with a Bearer challenge. `JwtAuthOptions.Key` is required, `Validation` is optional, and `Realm` defaults to `Restricted`. The generic overload requires a context implementing `IJwtContext` and stores the verified `JwtPayload` on its `Jwt` property.
 
 ```csharp
-using Miya;
-using Miya.Jwt;
+using Mugi;
+using Mugi.Jwt;
 
 public sealed class ApiContext : Context, IJwtContext
 {
@@ -839,7 +839,7 @@ api.Use(JwtAuth.Middleware<ApiContext>(new JwtAuthOptions { Key = key }));
 By default a handler's context carries only request and response data. To pass your own values from middleware to a handler with full type safety, derive from `Context` and use `App<TContext>`. There are no string keys and no casts.
 
 ```csharp
-using Miya;
+using Mugi;
 
 var app = new App<MyContext>();
 
@@ -867,7 +867,7 @@ A derived context is created fresh for each request. If you want it pooled and r
 
 Port selection uses the explicit `Run(port)` value first, then `AppOptions.Port`, then a valid integer in `PORT`, then 3000. A value outside 0 through 65535 supplied explicitly or through options is rejected; an invalid `PORT` value is ignored.
 
-`AppOptions.Address` selects the bind address and takes precedence over `HOST`. When it is omitted, `HOST` is used when it contains an IP address; otherwise Miya uses loopback. A container that must accept traffic from outside the container should set `Address = IPAddress.Any` or `HOST=0.0.0.0`. `IPAddress.IPv6Any` binds a dual-stack listener.
+`AppOptions.Address` selects the bind address and takes precedence over `HOST`. When it is omitted, `HOST` is used when it contains an IP address; otherwise Mugi uses loopback. A container that must accept traffic from outside the container should set `Address = IPAddress.Any` or `HOST=0.0.0.0`. `IPAddress.IPv6Any` binds a dual-stack listener.
 
 ```csharp
 using System.Net;
@@ -894,9 +894,9 @@ await app.RunAsync(new AppOptions
 });
 ```
 
-A cleartext listener cannot serve HTTP/1.1 and HTTP/2 at once, because it has no ALPN negotiation, and Miya rejects that combination at startup.
+A cleartext listener cannot serve HTTP/1.1 and HTTP/2 at once, because it has no ALPN negotiation, and Mugi rejects that combination at startup.
 
-Pass an `X509Certificate2` to terminate TLS inside Miya. With a certificate the default is HTTP/1.1 and HTTP/2, chosen per connection through ALPN:
+Pass an `X509Certificate2` to terminate TLS inside Mugi. With a certificate the default is HTTP/1.1 and HTTP/2, chosen per connection through ALPN:
 
 ```csharp
 using System.Security.Cryptography.X509Certificates;
@@ -923,42 +923,42 @@ Startup throws `PlatformNotSupportedException` when HTTP/3 is requested and `Qui
 
 ### Advanced Kestrel settings
 
-`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `AppOptions.Certificate`; Miya does not search for a development certificate or read Kestrel endpoint configuration files.
+`ConfigureKestrel` reaches other supported Kestrel settings. Certificate selection stays in `AppOptions.Certificate`; Mugi does not search for a development certificate or read Kestrel endpoint configuration files.
 
-`AppOptions.ConfigureServices` registers extra services in the internal Kestrel host. Miya never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
+`AppOptions.ConfigureServices` registers extra services in the internal Kestrel host. Mugi never requires dependency injection; this hook exists only for advanced Kestrel customization. Setting it uses the service-backed hosting path even for cleartext endpoints, and the registered services stay inside the server rather than reaching handlers or middleware.
 
 ## Performance
 
-Miya is built to be fast and allocation-light. In the measured scenarios:
+Mugi is built to be fast and allocation-light. In the measured scenarios:
 
 - The generated JSON serialization matches or beats System.Text.Json source generation on both mean time and allocated bytes, under JIT and NativeAOT.
 - Routing and the middleware pipeline allocate nothing on the synchronous hot path (a 404 miss and a 405 mismatch allocate only their small response state).
 - The `samples/Hello` NativeAOT binary is about 6.8 MiB and answers its first request within a few milliseconds of process start.
 
-Miya runs on Kestrel, the same HTTP server ASP.NET Core uses, so the raw request throughput is the same as an ASP.NET Core app doing the same work. The server is the shared bottleneck; Miya's difference is the thin layer above it, which shows up as lower per-request memory rather than higher throughput.
+Mugi runs on Kestrel, the same HTTP server ASP.NET Core uses, so the raw request throughput is the same as an ASP.NET Core app doing the same work. The server is the shared bottleneck; Mugi's difference is the thin layer above it, which shows up as lower per-request memory rather than higher throughput.
 
 Numbers, scenarios, the measurement environment, and how to reproduce them are in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## v0 limitations
 
-Miya v0 does not provide templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
+Mugi v0 does not provide templates, development-certificate discovery, or configuration-file integration. HTTP/3 depends on `QuicListener.IsSupported` and a supplied certificate. A reverse proxy remains an option for TLS termination.
 
 The route generator validates and parses literal patterns at compile time and embeds the parsed templates. At startup the runtime builds a segment trie from them and matches against it; the generator does not emit route-specific matching code.
 
-Diagnostics MIYA001 through MIYA004 cover JSON and route generation. MIYA006 checks literal `c.Param` calls against their handler's route. MIYA010 through MIYA015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. MIYA016 covers combining form and JSON body mappings. MIYA017 through MIYA019 cover duplicate or undeclared schema parts and explicit interface implementations. MIYA020 through MIYA023 cover invalid OpenAPI imports, unsupported schema structures, values that cannot be mapped to Miya, and generated-name collisions. MIYA024 through MIYA026 cover conflicting schema-part members, invalid shared rule declarations, and inaccessible predicates. The planned MIYA005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
+Diagnostics MUGI001 through MUGI004 cover JSON and route generation. MUGI006 checks literal `c.Param` calls against their handler's route. MUGI010 through MUGI015 cover typed-input route mappings, supported field types, schema declarations, rules, and conflicting binding shapes. MUGI016 covers combining form and JSON body mappings. MUGI017 through MUGI019 cover duplicate or undeclared schema parts and explicit interface implementations. MUGI020 through MUGI023 cover invalid OpenAPI imports, unsupported schema structures, values that cannot be mapped to Mugi, and generated-name collisions. MUGI024 through MUGI026 cover conflicting schema-part members, invalid shared rule declarations, and inaccessible predicates. The planned MUGI005 diagnostic for fields left uncleared by a pooled derived context is not implemented, so clearing them in `IPoolableContext.OnReturn()` remains the caller's responsibility.
 
 ## Acknowledgments
 
-Miya's design borrows from other frameworks and libraries.
+Mugi's design borrows from other frameworks and libraries.
 
 - [Hono](https://hono.dev) shaped the surface API: the context object (`c.Text`, `c.Json`, `c.Param`), the `:name` and `*name` route syntax, onion-order middleware, and the typed `App<TContext>` that mirrors Hono's `Hono<Env>`.
 - [zod](https://zod.dev) inspired the code-defined validation for typed input.
 - The JSON serializer follows ideas from [MessagePack-CSharp](https://github.com/MessagePack-CSharp/MessagePack-CSharp) and [MemoryPack](https://github.com/Cysharp/MemoryPack): a `ref struct` writer over `IBufferWriter<byte>`, source-generated codecs, and module-initializer registration instead of runtime dispatch.
-- Miya runs on [Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel) from ASP.NET Core.
+- Mugi runs on [Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel) from ASP.NET Core.
 
 ## License
 
-Miya is licensed under the MIT License. See [LICENSE](LICENSE).
+Mugi is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Third-party notices
 

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <PackageId>Mugi.Reflection</PackageId>
+    <Description>Opt-in reflection-based JSON codecs for Mugi.</Description>
+    <!-- This package uses runtime reflection and is intentionally not marked IsAotCompatible. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mugi.Json\Mugi.Json.csproj" />
+  </ItemGroup>
+
+</Project>

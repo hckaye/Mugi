@@ -1,0 +1,28 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Mugi.Benchmarks/Mugi.Benchmarks.csproj" />
+    <Project Path="benchmarks/Mugi.LoadBench/Mugi.LoadBench.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Hello/Hello.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Mugi.Gen/Mugi.Gen.csproj" />
+    <Project Path="src/Mugi.Generators.Core/Mugi.Generators.Core.csproj" />
+    <Project Path="src/Mugi.Generators/Mugi.Generators.csproj" />
+    <Project Path="src/Mugi.Jwt/Mugi.Jwt.csproj" />
+    <Project Path="src/Mugi.Json/Mugi.Json.csproj" />
+    <Project Path="src/Mugi.Reflection/Mugi.Reflection.csproj" />
+    <Project Path="src/Mugi.Schema/Mugi.Schema.csproj" />
+    <Project Path="src/Mugi/Mugi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mugi.Generators.Tests/Mugi.Generators.Tests.csproj" />
+    <Project Path="tests/Mugi.IntegrationTests/Mugi.IntegrationTests.csproj" />
+    <Project Path="tests/Mugi.Jwt.Tests/Mugi.Jwt.Tests.csproj" />
+    <Project Path="tests/Mugi.Json.Tests/Mugi.Json.Tests.csproj" />
+    <Project Path="tests/Mugi.Reflection.Tests/Mugi.Reflection.Tests.csproj" />
+    <Project Path="tests/Mugi.Schema.Tests/Mugi.Schema.Tests.csproj" />
+    <Project Path="tests/Mugi.Tests/Mugi.Tests.csproj" />
+  </Folder>
+</Solution>

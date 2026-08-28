@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Mugi.Jwt</PackageId>
+    <Description>Native AOT-compatible JWT signing, validation, and authentication middleware for Mugi.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Mugi/Mugi.csproj" />
+    <ProjectReference Include="../Mugi.Json/Mugi.Json.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
-using Miya;
-using Miya.Json;
-using Miya.Schema;
+using Mugi;
+using Mugi.Json;
+using Mugi.Schema;
 
 var app = new App();
 

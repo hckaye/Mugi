@@ -17,17 +17,17 @@ The startup samples were 21.598, 9.278, 8.435, 8.452, 8.848, 8.710, 7.641, 8.389
 
 ## Memory and throughput vs ASP.NET Core
 
-`benchmarks/Miya.LoadBench` starts a Miya server and an equivalent ASP.NET Core Minimal API server one at a time and drives each with an `HttpClient` load client over HTTP/1.1 loopback (128 concurrent workers, a 3-second warmup, and a 10-second measurement). Both servers return the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names, with console logging removed and no application services registered.
+`benchmarks/Mugi.LoadBench` starts a Mugi server and an equivalent ASP.NET Core Minimal API server one at a time and drives each with an `HttpClient` load client over HTTP/1.1 loopback (128 concurrent workers, a 3-second warmup, and a 10-second measurement). Both servers return the same bodies from `GET /`, `GET /users/123`, and `POST /echo`. The ASP.NET Core server used `WebApplication.CreateSlimBuilder`, Minimal API routing, and a source-generated System.Text.Json context with camelCase names, with console logging removed and no application services registered.
 
-Throughput was within about 1 to 3 percent between the two on every endpoint, matching the shared Kestrel transport. Miya used a peak working set about 20 MiB lower and allocated less per request. The table is the median of three iterations.
+Throughput was within about 1 to 3 percent between the two on every endpoint, matching the shared Kestrel transport. Mugi used a peak working set about 20 MiB lower and allocated less per request. The table is the median of three iterations.
 
 | Endpoint | Framework | Throughput (req/s) | p99 | Peak working set | Allocated/request |
 | --- | --- | ---: | ---: | ---: | ---: |
-| plaintext | Miya | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
+| plaintext | Mugi | 176,258 | 1.971 ms | 76.8 MiB | 104 B |
 | plaintext | ASP.NET Core | 174,897 | 1.960 ms | 97.8 MiB | 1,016 B |
-| JSON GET | Miya | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
+| JSON GET | Mugi | 174,233 | 1.945 ms | 78.7 MiB | 168 B |
 | JSON GET | ASP.NET Core | 175,505 | 1.967 ms | 98.4 MiB | 384 B |
-| JSON POST | Miya | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
+| JSON POST | Mugi | 171,429 | 1.968 ms | 78.0 MiB | 400 B |
 | JSON POST | ASP.NET Core | 166,704 | 2.048 ms | 100.5 MiB | 648 B |
 
 Per-request allocation is the server's `GC.GetTotalAllocatedBytes` difference across the measured interval divided by the request count. The peak working set is the maximum of `WorkingSet64` sampled every 10 ms while the server ran.
@@ -35,21 +35,21 @@ Per-request allocation is the server's `GC.GetTotalAllocatedBytes` difference ac
 Run the same JIT comparison with:
 
 ```sh
-./benchmarks/Miya.LoadBench/run.sh \
+./benchmarks/Mugi.LoadBench/run.sh \
   --concurrency 128 --warmup 3 --duration 10 --iterations 3
 ```
 
-## Miya and System.Text.Json
+## Mugi and System.Text.Json
 
-The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Miya used codecs emitted by `Miya.Generators` and resolved them through the codec-free `Json.Serialize` and `Json.Deserialize` overloads. No benchmark-specific codecs were used.
+The serializer jobs used one launch, five warmup iterations, twenty measured iterations, and a 250 ms iteration time. Mugi used codecs emitted by `Mugi.Generators` and resolved them through the codec-free `Json.Serialize` and `Json.Deserialize` overloads. No benchmark-specific codecs were used.
 
 Both serializers wrote to reused `IBufferWriter<byte>` instances. System.Text.Json used source generation, camelCase naming, `UnsafeRelaxedJsonEscaping`, required-member checks, and nullable-annotation checks. Request JSON was prepared before the measured interval, and setup verified that both serializers rejected a missing required property and a null value for its non-nullable property. The buffer-growth case created a 16-byte buffer inside each operation.
 
-The pass condition requires Miya's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. These results passed all sixteen JIT and NativeAOT cases. Allocated bytes were no greater than System.Text.Json in every scenario.
+The pass condition requires Mugi's mean and allocated bytes to be no greater than System.Text.Json in every scenario under both JIT and NativeAOT. These results passed all sixteen JIT and NativeAOT cases. Allocated bytes were no greater than System.Text.Json in every scenario.
 
 JIT results:
 
-| Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
+| Scenario | Mugi mean | STJ mean | Mugi allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
 | Small DTO | 57.44 ns | 66.05 ns | 0 B | 0 B |
 | List of 100 DTOs | 3,199.00 ns | 5,098.00 ns | 0 B | 0 B |
@@ -62,7 +62,7 @@ JIT results:
 
 NativeAOT results:
 
-| Scenario | Miya mean | STJ mean | Miya allocated | STJ allocated |
+| Scenario | Mugi mean | STJ mean | Mugi allocated | STJ allocated |
 | --- | ---: | ---: | ---: | ---: |
 | Small DTO | 45.97 ns | 58.77 ns | 0 B | 0 B |
 | List of 100 DTOs | 7,577.34 ns | 9,414.40 ns | 0 B | 0 B |
@@ -85,7 +85,7 @@ SpanJson 4.2.1 was measured separately under JIT because its API returns a new `
 | Integer-centric DTO | 6,726.19 ns | 1,032 B |
 | Request binding | 194.46 ns | 280 B |
 
-Miya's JIT mean was lower in four of these seven reference scenarios. SpanJson's mean was lower for the small DTO, nested DTO, and request-binding cases.
+Mugi's JIT mean was lower in four of these seven reference scenarios. SpanJson's mean was lower for the small DTO, nested DTO, and request-binding cases.
 
 ## Routing and middleware pipeline
 
@@ -109,17 +109,17 @@ The pipeline benchmark uses the same harness and a static route handler.
 ## Running the benchmarks
 
 ```sh
-dotnet build benchmarks/Miya.Benchmarks/Miya.Benchmarks.csproj -c Release
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --filter '*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
+dotnet build benchmarks/Mugi.Benchmarks/Mugi.Benchmarks.csproj -c Release
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --filter '*'
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- \
   --jit-only --filter '*SmallDto*' '*RequestBind*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- \
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- \
   --jit-only --filter '*List100*'
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --routing
-MIYA_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
-  --project benchmarks/Miya.Benchmarks -- --spanjson
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --routing
+MUGI_BENCHMARK_FINAL=1 dotnet run -c Release --no-build \
+  --project benchmarks/Mugi.Benchmarks -- --spanjson
 ```

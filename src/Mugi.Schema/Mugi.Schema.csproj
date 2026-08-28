@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Mugi.Schema</PackageId>
+    <Description>Typed request binding and validation for Mugi.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Mugi/Mugi.csproj" />
+    <ProjectReference Include="../Mugi.Json/Mugi.Json.csproj" />
+  </ItemGroup>
+
+</Project>

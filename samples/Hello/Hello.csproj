@@ -5,16 +5,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <InterceptorsNamespaces>$(InterceptorsNamespaces);Miya.Generated</InterceptorsNamespaces>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Mugi.Generated</InterceptorsNamespaces>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/Miya/Miya.csproj" />
-    <ProjectReference Include="../../src/Miya.Schema/Miya.Schema.csproj" />
-    <ProjectReference Include="../../src/Miya.Generators/Miya.Generators.csproj"
+    <ProjectReference Include="../../src/Mugi/Mugi.csproj" />
+    <ProjectReference Include="../../src/Mugi.Schema/Mugi.Schema.csproj" />
+    <ProjectReference Include="../../src/Mugi.Generators/Mugi.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>

@@ -6,11 +6,11 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace Condition="'$(RootNamespace)' == ''">$(MSBuildProjectName)</RootNamespace>
     <Authors>hckaye</Authors>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/hckaye/Miya</RepositoryUrl>
+    <RepositoryUrl>https://github.com/hckaye/Mugi</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://github.com/hckaye/Miya</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/hckaye/Mugi</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReadmeSource>$(MSBuildThisFileDirectory)README.md</PackageReadmeSource>
     <PackageReadmeSource Condition="Exists('$(MSBuildProjectDirectory)/README.md')">$(MSBuildProjectDirectory)/README.md</PackageReadmeSource>

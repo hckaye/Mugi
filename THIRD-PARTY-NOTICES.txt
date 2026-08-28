@@ -1,4 +1,4 @@
-Third-party notices for Miya
+Third-party notices for Mugi
 
 No third-party code has been incorporated yet. When code is ported from another
 project, this file records for each file: the source file, commit, original
@@ -6,7 +6,7 @@ authors, the applicable license, and its full text.
 
 JSONTestSuite parsing corpus
 
-Files: tests/Miya.Json.Tests/TestData/JSONTestSuite/y_*.json and n_*.json
+Files: tests/Mugi.Json.Tests/TestData/JSONTestSuite/y_*.json and n_*.json
 Source: https://github.com/nst/JSONTestSuite/tree/1ef36fa01286573e846ac449e8683f8833c5b26a/test_parsing
 Commit: 1ef36fa01286573e846ac449e8683f8833c5b26a
 Original author: Nicolas Seriot and JSONTestSuite contributors

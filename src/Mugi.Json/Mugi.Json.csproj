@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Mugi.Json</PackageId>
+    <Description>The Native AOT-compatible JSON serializer used by Mugi.</Description>
+  </PropertyGroup>
+
+</Project>

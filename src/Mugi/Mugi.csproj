@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PackageId>Mugi</PackageId>
+    <Description>A fast, simple web application framework for .NET, built for Native AOT.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Mugi.Json/Mugi.Json.csproj" />
+  </ItemGroup>
+
+</Project>
